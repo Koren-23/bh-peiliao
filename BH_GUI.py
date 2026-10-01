@@ -2538,7 +2538,7 @@ class BHPeilianApp(tk.Tk):
         #   第 2 列：預覽        ／ 新預覽
         #   第 3 列：空白表單    ／ （空白）
         #   第 4 列：填滿剩餘高度
-        VIOLET, ORANGE = "#6B5B95", "#CD853F"
+        VIOLET, ORANGE = "#6B5B95", "#F2D7B6"   # 採購修正欄用淺色底，標題改深色
         side = tk.Frame(self, bg=VIOLET)
         side.pack(side="right", fill="y")
         for c in (0, 1):
@@ -2550,17 +2550,18 @@ class BHPeilianApp(tk.Tk):
             f = tk.Frame(side, bg=bg)
             f.grid(row=row, column=col, sticky="nsew")
             if 0 < row < 4:   # 列與列之間的分隔線
-                tk.Frame(f, bg="#6B46C1" if col == 0 else "#E8935A", height=1).pack(fill="x", padx=8, pady=(8, 4))
+                tk.Frame(f, bg="#6B46C1" if col == 0 else "#D9B48F", height=1).pack(fill="x", padx=8, pady=(8, 4))
             return f
 
         def title(f, text, ghost=False):
             """欄標題（白字）；ghost=True 時文字與底色同色，只佔位以對齊另一欄"""
             bg = f.cget("bg")
-            tk.Label(f, text=text, bg=bg, fg=bg if ghost else "white",
+            fg = "white" if bg == VIOLET else "#5A3510"
+            tk.Label(f, text=text, bg=bg, fg=bg if ghost else fg,
                      font=("Microsoft JhengHei", 9, "bold")).pack(pady=(6, 0))
 
         def head(f, text):
-            tk.Label(f, text=text, bg=f.cget("bg"), fg="#FBD38D",
+            tk.Label(f, text=text, bg=f.cget("bg"), fg="#FBD38D" if f.cget("bg") == VIOLET else "#7B4A1E",
                      font=("Microsoft JhengHei", 9, "bold")).pack(pady=(6, 4))
 
         def btn(f, text, cmd, bg, abg):
@@ -2591,10 +2592,10 @@ class BHPeilianApp(tk.Tk):
         f = cell(1, 1)
         title(f, "配料結果", ghost=True)
         head(f, "匯出")
-        btn(f, "🗂 排列圖PDF", self._new_export_layout, "#8C6D3F", "#6B5230")
+        btn(f, "🗂 排列圖PDF", self._new_export_layout, "#744210", "#5A3200")
         btn(f, "🖨 匯出PDF",   self._new_export_pdf,    "#744210", "#5A3200")
-        btn(f, "💾 匯出Excel", self._new_export_xlsx,   "#4A6741", "#3A5232")
-        btn(f, "📝 信暐訂購單", self._open_order_select, "#C06080", "#9C4060")
+        btn(f, "💾 匯出Excel", self._new_export_xlsx,   "#744210", "#5A3200")
+        btn(f, "📝 信暐訂購單", self._open_order_select, "#744210", "#5A3200")
 
         # 第 2 列：預覽 ／ 新預覽
         f = cell(2, 0)
@@ -2603,8 +2604,8 @@ class BHPeilianApp(tk.Tk):
         btn(f, "📐 排列圖",   self._preview_layout, "#3D6B6B", "#235F60")
         f = cell(2, 1)
         head(f, "新預覽")
-        btn(f, "🔍 配料結果", self._new_preview_result, "#C06080", "#9C4060")
-        btn(f, "🗂 排列圖",   self._new_preview_layout, "#C06080", "#9C4060")
+        btn(f, "🔍 配料結果", self._new_preview_result, "#5B7A99", "#4A6680")
+        btn(f, "🗂 排列圖",   self._new_preview_layout, "#5B7A99", "#4A6680")
 
         # 第 3 列：空白表單
         f = cell(3, 0)

@@ -10,7 +10,7 @@
   --bg:#F0F4F8; --surface:#FFFFFF; --ink:#1A202C; --muted:#718096; --line:#CBD5E0;
   --navy:#1A3050; --navy2:#1E3A5F; --sky:#90CDF4;
   --primary:#2B6CB0; --danger:#7A3535; --green:#4A6741; --teal:#3D6B6B; --slate:#4A6C7A;
-  --violet:#6B46C1; --violet-bar:#6B5B95; --brown:#8C6D3F; --rust:#744210; --rose:#C06080; --orange-bar:#CD853F;
+  --violet:#6B46C1; --violet-bar:#6B5B95; --brown:#8C6D3F; --rust:#744210; --rose:#C06080; --orange-bar:#F2D7B6; --calm:#5B7A99;
   --row-odd:#F7FAFC; --row-even:#EBF4FF; --row-comp:#D6EAF8; --row-scrap:#D4EDDA; --row-unused:#FFF3CD;
   --row-error:#FED7D7; --row-changed:#C6EFCE; --row-sel:#BEE3F8;
   --font:"Microsoft JhengHei","微軟正黑體","PingFang TC","Noto Sans TC",system-ui,sans-serif;
@@ -40,7 +40,7 @@ button{font-family:inherit}
 .btn-lg{padding:10px 20px;font-size:15px}
 .btn-primary{--c:var(--primary)} .btn-danger{--c:var(--danger)} .btn-green{--c:var(--green)} .btn-teal{--c:var(--teal)}
 .btn-slate{--c:var(--slate)} .btn-violet{--c:var(--violet)} .btn-brown{--c:var(--brown)} .btn-rust{--c:var(--rust)}
-.btn-rose{--c:var(--rose)} .btn-gray{--c:#718096} .btn-navy{--c:var(--navy)}
+.btn-rose{--c:var(--rose)} .btn-calm{--c:var(--calm)} .btn-gray{--c:#718096} .btn-navy{--c:var(--navy)}
 .btn-ghost{background:#E2E8F0;color:#2D3748}
 .btn-ghost:hover{filter:brightness(.96)}
 
@@ -74,6 +74,9 @@ button{font-family:inherit}
 .sides .btn{width:100%;justify-content:center;padding:9px 6px;font-size:13.5px}
 .side-title{color:#fff;font-weight:700;text-align:center;font-size:13px;padding:4px 0 2px;border-bottom:1px solid rgba(255,255,255,.3);margin-bottom:2px}
 .side-title.ghost{visibility:hidden}
+/* 採購修正欄：淺色底，標題改深色 */
+.sides .cell.b h3{color:#7B4A1E} .sides .cell.b .side-title{color:#5A3510;border-bottom-color:rgba(90,53,16,.3)}
+.sides .cell.b.row{border-top-color:rgba(90,53,16,.2)}
 /* ── param form ── */
 .sections{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px;align-items:start;max-width:1200px}
 .sec{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
@@ -299,10 +302,10 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
     <div class="cell b row">
       <div class="side-title ghost" aria-hidden="true">配料結果</div>
       <h3>匯出</h3>
-      <button class="btn btn-brown" data-act="newExportLayout">🗂 排列圖PDF</button>
+      <button class="btn btn-rust" data-act="newExportLayout">🗂 排列圖PDF</button>
       <button class="btn btn-rust" data-act="newExportPdf">🖨 匯出PDF</button>
-      <button class="btn btn-green" data-act="newExportXlsx">💾 匯出Excel</button>
-      <button class="btn btn-rose" data-act="orderNew">📝 信暐訂購單</button>
+      <button class="btn btn-rust" data-act="newExportXlsx">💾 匯出Excel</button>
+      <button class="btn btn-rust" data-act="orderNew">📝 信暐訂購單</button>
     </div>
     <!-- 第 3 列：預覽 ／ 新預覽 -->
     <div class="cell a row">
@@ -312,8 +315,8 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
     </div>
     <div class="cell b row">
       <h3>新預覽</h3>
-      <button class="btn btn-rose" data-act="newPreview">🔍 配料結果</button>
-      <button class="btn btn-rose" data-act="newPreviewLayout">🗂 排列圖</button>
+      <button class="btn btn-calm" data-act="newPreview">🔍 配料結果</button>
+      <button class="btn btn-calm" data-act="newPreviewLayout">🗂 排列圖</button>
     </div>
     <!-- 第 4 列：空白表單 -->
     <div class="cell a row">
