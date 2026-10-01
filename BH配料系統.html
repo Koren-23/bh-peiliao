@@ -576,7 +576,7 @@ function planOnce(groups, P, existing_scraps, seed) {
       var row_scrap_objs = [];
       if (col_used_list) {
         col_used_list.forEach(function (c_used) {
-          var seg_left_l = Math.max(0, bl - c_used - new_kerf), obj = null;
+          var seg_left_l = Math.max(0, bl - c_used - new_trim - new_kerf), obj = null;
           if (seg_left_l > 0) {
             var slw = pyRound(calcWeight(width, thick, seg_left_l, density), 0);
             obj = {src: idx, type: taken[0].type, spec: "PL" + thick + "×" + width + "×" + seg_left_l,
@@ -1689,6 +1689,14 @@ function drawScrapBlock(dr, x0, y0, x1, y1) {
 }
 const LV = {MIN_ROW_H: 80, LABEL_W_BOARD: 40, GAP_1: 30, LABEL_W_ROW: 52, GAP_2: 20, TOP: 50, BOT: 30};
 LV.MARGIN = LV.LABEL_W_BOARD + LV.GAP_1 + LV.LABEL_W_ROW + LV.GAP_2;
+const LV_EDGE = "#E2E8F0";   // 修邊
+// 排的已用長度（含前端修邊），與配料計算的 col_used 相同
+const layoutRowUsed = (L, row) => L.trim + row.parts.reduce((a, p, i) => a + (i ? L.kerf : 0) + p.length, 0);
+const layoutRowLeft = (L, row) => Math.max(0, L.board_l - layoutRowUsed(L, row) - L.trim - L.kerf);
+function layoutWidthLeft(L) {
+  const nr = L.rows.filter(x => x.parts && x.parts.length).length;
+  return Math.max(0, L.board_w - (nr * L.part_w + Math.max(0, nr - 1) * L.kerf + L.trim * 2) - L.kerf);
+}
 function layoutSize(L, zoom) {
   const scale = (LV.MIN_ROW_H / L.part_w) * zoom;
   return {w: Math.ceil(L.board_l * scale) + LV.MARGIN + 60, h: Math.ceil(L.board_w * scale) + LV.TOP + LV.BOT + 20};
@@ -1696,12 +1704,14 @@ function layoutSize(L, zoom) {
 function renderLayout(dr, L, zoom) {
   const scale = (LV.MIN_ROW_H / L.part_w) * zoom;
   const x0 = LV.MARGIN, y0 = LV.TOP, x1 = LV.MARGIN + L.board_l * scale, y1 = LV.TOP + L.board_w * scale;
-  dr.rect(x0, y0, x1, y1, {outline: "#333", width: 2, fill: "#FAFAFA"});
+  // 底色＝修邊（四周修邊與無法成為餘料的邊角）；零件、切割縫、餘料畫在上面
+  dr.rect(x0, y0, x1, y1, {outline: "#333", width: 2, fill: LV_EDGE});
   dr.text((x0 + x1) / 2, y0 - 28, `板長 ${L.board_l} mm`, {size: 14, bold: true});
   dr.text(LV.LABEL_W_BOARD / 2, (y0 + y1) / 2, `板寬 ${L.board_w} mm`, {size: 13, bold: true, angle: 90});
-  let cur_y = y0;
+  const row_h = L.part_w * scale;
+  let cur_y = y0 + L.trim * scale;
   L.rows.forEach((row, ri) => {
-    const row_h = L.part_w * scale;
+    if (ri > 0) { dr.rect(x0, cur_y, x1, cur_y + L.kerf * scale, {fill: "#FFD966"}); cur_y += L.kerf * scale; }
     let cur_x = x0 + L.trim * scale;
     row.parts.forEach((part, pi) => {
       if (pi > 0) { const kx1 = cur_x + L.kerf * scale; dr.rect(cur_x, cur_y, kx1, cur_y + row_h, {fill: "#FFD966"}); cur_x = kx1; }
@@ -1718,25 +1728,30 @@ function renderLayout(dr, L, zoom) {
       }
       cur_x += pw;
     });
-    if (cur_x < x1) {
-      drawScrapBlock(dr, cur_x, cur_y, x1, cur_y + row_h);
-      const rem = ((x1 - cur_x) / scale).toFixed(0);
+    // 長度方向餘料：與切割明細相同算法（扣最後一刀鋸縫及尾端修邊）
+    const rem = layoutRowLeft(L, row);
+    if (rem > 0) {
+      const kx1 = cur_x + L.kerf * scale, sx1 = kx1 + rem * scale;
+      dr.rect(cur_x, cur_y, kx1, cur_y + row_h, {fill: "#FFD966"});
+      drawScrapBlock(dr, kx1, cur_y, sx1, cur_y + row_h);
       const no = row.scrap_ref ? (row.scrap_ref._no || "") : "";
       const label = no ? `♻ ${no} ${rem}mm` : `♻ 餘料 ${rem}mm`;
-      if ((x1 - cur_x) > 55 && row_h > 28) dr.text((cur_x + x1) / 2, cur_y + row_h / 2, label, {size: Math.max(9, Math.min(13, Math.trunc(row_h / 4))), bold: true, fill: "#B45309"});
+      if ((sx1 - kx1) > 55 && row_h > 28) dr.text((kx1 + sx1) / 2, cur_y + row_h / 2, label, {size: Math.max(9, Math.min(13, Math.trunc(row_h / 4))), bold: true, fill: "#B45309"});
     }
     const lcx = x0 - LV.GAP_2 - LV.LABEL_W_ROW / 2, mid = cur_y + row_h / 2;
     dr.text(lcx, mid - 10, `排${ri + 1}`, {size: 13, bold: true});
     dr.text(lcx, mid + 10, `W${L.part_w}`, {size: 10, fill: "#555"});
     cur_y += row_h;
-    if (ri < L.rows.length - 1) dr.line(x0, cur_y, x1, cur_y, {fill: "#999", width: 1, dash: [2, 2]});
   });
-  if (cur_y < y1) {
-    drawScrapBlock(dr, x0, cur_y, x1, y1);
+  // 寬度方向餘料：與切割明細相同算法（扣一刀鋸縫及另一側修邊）
+  const wrem = layoutWidthLeft(L);
+  if (wrem > 0) {
+    const ky1 = cur_y + L.kerf * scale, sy1 = ky1 + wrem * scale;
+    dr.rect(x0, cur_y, x1, ky1, {fill: "#FFD966"});
+    drawScrapBlock(dr, x0, ky1, x1, sy1);
     const no = L.width_scrap_ref ? (L.width_scrap_ref._no || "") : "";
-    const mmv = ((y1 - cur_y) / scale).toFixed(0);
-    const label = no ? `♻ ${no} 寬度方向餘料 ${mmv}mm` : `♻ 寬度方向餘料 ${mmv}mm`;
-    if ((y1 - cur_y) > 20) dr.text((x0 + x1) / 2, (cur_y + y1) / 2, label, {size: 12, bold: true, fill: "#B45309"});
+    const label = no ? `♻ ${no} 寬度方向餘料 ${wrem}mm` : `♻ 寬度方向餘料 ${wrem}mm`;
+    if ((sy1 - ky1) > 20) dr.text((x0 + x1) / 2, (ky1 + sy1) / 2, label, {size: 12, bold: true, fill: "#B45309"});
   }
 }
 function layoutCanvas(L, zoom, pxRatio) {
@@ -1760,7 +1775,8 @@ function openLayoutViewer(idx, L) {
     headHTML: `<button class="btn btn-teal btn-sm" data-a="png">💾 下載圖片</button>`,
     bodyHTML: `<div class="lv-legend">
         <span><i class="sw" style="background:#4A90D9"></i>零件</span>
-        <span><i class="sw" style="background:#FDE7C8;outline:2px dashed #DC6803;outline-offset:-2px"></i>♻ 餘料/邊料</span>
+        <span><i class="sw" style="background:#FDE7C8;outline:2px dashed #DC6803;outline-offset:-2px"></i>♻ 餘料</span>
+        <span><i class="sw" style="background:#E2E8F0;outline:1px solid #94A3B8;outline-offset:-1px"></i>修邊</span>
         <span><i class="sw" style="background:#FFD966"></i>切割縫(kerf)</span>
         <div class="zoom">縮放：<button class="btn btn-ghost btn-sm" data-z="-0.25" aria-label="縮小">－</button><span id="lvZoom">100%</span>
         <button class="btn btn-ghost btn-sm" data-z="+0.25" aria-label="放大">＋</button><button class="btn btn-ghost btn-sm" data-z="0">100%</button><button class="btn btn-ghost btn-sm" data-z="fit">⤢ 符合寬度</button></div>
@@ -2170,8 +2186,9 @@ function checkSize(r, row, orig_spec) {
     const qty = ct.qty ?? 1, L = ct.layout;
     if (L) {
       const nr = L.rows.filter(x => x.parts && x.parts.length).length;
-      let max_l = 0; L.rows.forEach(x => x.parts.forEach(pp => { if (pp.length > max_l) max_l = pp.length; }));
-      return [nr * L.part_w + Math.max(0, nr - 1) * kerf + trim * 2, max_l + trim * 2];
+      // 板長需容納最長的一整排（各段零件 + 段間鋸縫 + 兩端修邊）
+      const max_used = Math.max(0, ...L.rows.map(x => layoutRowUsed(L, x)));
+      return [nr * L.part_w + Math.max(0, nr - 1) * kerf + trim * 2, max_used + trim];
     }
     const ps = ct.part_spec || "";
     const mp = specRe.exec(ps);
@@ -2214,45 +2231,47 @@ function makeModifiedResult(base, rows) {
   const dim_map = new Map();
   rows.forEach(row => { const mo = specRe.exec(row.orig_spec); if (mo) dim_map.set(`${+mo[1]},${+mo[2]},${+mo[3]}`, row); });
   const new_scraps = [];
+  // 未重新計算的片次（使用現有餘料、或找不到對應採購規格）保留原本產生的餘料
+  const keepOld = ct => r.new_scraps.forEach(sc => { if (sc.src === ct.idx) new_scraps.push(sc); });
   r.cut_details.forEach(ct => {
-    if (ct.is_scrap) return;
-    const m = specRe.exec(ct.board_spec); if (!m) return;
-    const row = dim_map.get(`${+m[1]},${+m[2]},${+m[3]}`); if (!row) return;
+    if (ct.is_scrap) { keepOld(ct); return; }
+    const m = specRe.exec(ct.board_spec); if (!m) { keepOld(ct); return; }
+    const row = dim_map.get(`${+m[1]},${+m[2]},${+m[3]}`); if (!row) { keepOld(ct); return; }
     const nbw = row.width, nbl = row.length;
     const nwt = Math.trunc(calcWeight(nbw, row.thick, nbl, density));
-    let used_w, used_l;
     const L = ct.layout;
+    ct.board_spec = peSpec(row); ct.board_wt = nwt;
     if (L) {
-      const nr = L.rows.filter(x => x.parts && x.parts.length).length;
-      used_w = nr * L.part_w + Math.max(0, nr - 1) * kerf + trim * 2;
-      let max_used = 0;
-      L.rows.forEach(x => { let cl = trim; x.parts.forEach(pp => { cl += pp.length + kerf; }); max_used = Math.max(max_used, cl - kerf); });
-      used_l = max_used + trim;
-    } else {
-      const mp = specRe.exec(ct.part_spec || "");
-      if (mp) { const q = ct.qty ?? 1; used_w = q * +mp[2] + (q - 1) * kerf + trim * 2; used_l = +mp[3] + trim * 2; }
-      else { used_w = nbw; used_l = nbl; }
+      // 多段切割：與配料計算（add_board）相同算法，寬度方向一塊 + 每排各自的長度方向餘料
+      L.board_w = nbw; L.board_l = nbl;
+      const specs = [], mk = (w, l) => {
+        const wt = pyRound(calcWeight(w, row.thick, l, density), 0);
+        specs.push(`PL${row.thick}×${w}×${l}（${fmtF(wt)}kg）`);
+        const obj = {src: ct.idx, type: ct.type, spec: `PL${row.thick}×${w}×${l}`, mat: ct.mat, wt: Math.trunc(wt)};
+        new_scraps.push(obj);
+        return obj;
+      };
+      const wl = layoutWidthLeft(L);
+      L.width_scrap_ref = wl > 0 ? mk(wl, nbl) : null;
+      L.rows.forEach(x => { const rl = layoutRowLeft(L, x); x.scrap_ref = rl > 0 ? mk(L.part_w, rl) : null; });
+      ct.leftover = specs.length ? specs.join("　") : "無餘料";
+      return;
     }
+    let used_w = nbw, used_l = nbl;
+    const mp = specRe.exec(ct.part_spec || "");
+    if (mp) { const q = ct.qty ?? 1; used_w = q * +mp[2] + (q - 1) * kerf + trim * 2; used_l = +mp[3] + trim * 2; }
     const lw_ = nbw - used_w, ll_ = nbl - used_l, specs = [];
-    let width_scrap = null;
     if (lw_ > 0) {
       const lw = Math.trunc(pyRound(calcWeight(lw_, row.thick, nbl, density), 0));
       specs.push(`PL${row.thick}×${lw_}×${nbl}（${lw}kg）`);
-      width_scrap = {src: ct.idx, type: ct.type, spec: `PL${row.thick}×${lw_}×${nbl}`, mat: ct.mat, wt: lw};
-      new_scraps.push(width_scrap);
+      new_scraps.push({src: ct.idx, type: ct.type, spec: `PL${row.thick}×${lw_}×${nbl}`, mat: ct.mat, wt: lw});
     }
     if (ll_ > 0) {
       const ll = Math.trunc(pyRound(calcWeight(nbw, row.thick, ll_, density), 0));
       specs.push(`PL${row.thick}×${nbw}×${ll_}（${ll}kg）`);
       new_scraps.push({src: ct.idx, type: ct.type, spec: `PL${row.thick}×${nbw}×${ll_}`, mat: ct.mat, wt: ll});
     }
-    ct.board_spec = peSpec(row); ct.board_wt = nwt; ct.leftover = specs.length ? specs.join("　") : "無餘料";
-    // 排列圖跟著修改後尺寸更新；餘料已重新計算，舊的各排餘料參照不再存在於 new_scraps
-    if (L) {
-      L.board_w = nbw; L.board_l = nbl;
-      L.width_scrap_ref = width_scrap;
-      L.rows.forEach(x => { x.scrap_ref = null; });
-    }
+    ct.leftover = specs.length ? specs.join("　") : "無餘料";
   });
   r.new_scraps = new_scraps;
   return r;

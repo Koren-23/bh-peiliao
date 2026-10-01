@@ -271,7 +271,8 @@ def _plan_once(by_group, density, new_kerf, new_trim, scrap_kerf, scrap_trim,
             row_scrap_objs = []
             if col_used_list is not None:
                 for c_used in col_used_list:
-                    seg_left_l = bl - c_used - new_kerf
+                    # 與上方 left_specs 相同：扣尾端修邊及最後一刀鋸縫
+                    seg_left_l = bl - c_used - new_trim - new_kerf
                     seg_left_l = max(0, seg_left_l)
                     obj = None
                     if seg_left_l > 0:
@@ -1574,6 +1575,29 @@ def draw_scrap_block(drawer, x0, y0, x1, y1):
     drawer.rect(x0, y0, x1, y1, outline="#DC6803", width=2, dash=(4, 2))
 
 
+LAYOUT_EDGE_CLR = "#E2E8F0"   # 修邊
+
+
+def layout_row_used(L, row):
+    """排的已用長度（含前端修邊），與配料計算的 col_used 相同"""
+    used = L["trim"]
+    for i, p in enumerate(row.get("parts", [])):
+        used += (L["kerf"] if i else 0) + p["length"]
+    return used
+
+
+def layout_row_left(L, row):
+    """該排長度方向餘料：扣最後一刀鋸縫及尾端修邊（與切割明細相同算法）"""
+    return max(0, L["board_l"] - layout_row_used(L, row) - L["trim"] - L["kerf"])
+
+
+def layout_width_left(L):
+    """寬度方向餘料：扣一刀鋸縫及兩側修邊（與切割明細相同算法）"""
+    nr = len([r for r in L["rows"] if r.get("parts")])
+    used_w = nr * L["part_w"] + max(0, nr - 1) * L["kerf"] + L["trim"] * 2
+    return max(0, L["board_w"] - used_w - L["kerf"])
+
+
 def render_layout(drawer, layout, zoom=1.0):
     """
     共用繪圖核心邏輯：計算所有座標並透過 drawer 畫出排列圖。
@@ -1612,7 +1636,8 @@ def render_layout(drawer, layout, zoom=1.0):
     x1 = margin + board_l*scale
     y1 = TOP_MARGIN + board_w*scale
 
-    drawer.rect(x0, y0, x1, y1, outline="#333", width=2, fill="#FAFAFA")
+    # 底色＝修邊（四周修邊與無法成為餘料的邊角）；零件、切割縫、餘料畫在上面
+    drawer.rect(x0, y0, x1, y1, outline="#333", width=2, fill=LAYOUT_EDGE_CLR)
 
     # 板長標示：放在板框上方正中央
     drawer.text((x0+x1)/2, y0-28, f"板長 {board_l} mm", font_size=14, bold=True)
@@ -1622,9 +1647,12 @@ def render_layout(drawer, layout, zoom=1.0):
     drawer.text(board_label_x, (y0+y1)/2, f"板寬 {board_w} mm",
                 font_size=13, bold=True, angle=90)
 
-    cur_y = y0
+    row_h = part_w * scale
+    cur_y = y0 + trim*scale
     for ri, row in enumerate(rows):
-        row_h = part_w * scale
+        if ri > 0:
+            drawer.rect(x0, cur_y, x1, cur_y + kerf*scale, fill="#FFD966")
+            cur_y += kerf*scale
         cur_x = x0 + trim*scale
         parts = row["parts"]
 
@@ -1654,15 +1682,19 @@ def render_layout(drawer, layout, zoom=1.0):
                             font_size=fs, fill="white")
             cur_x += pw
 
-        if cur_x < x1:
-            draw_scrap_block(drawer, cur_x, cur_y, x1, cur_y+row_h)
-            rem_mm = (x1 - cur_x) / scale
+        # 長度方向餘料：與切割明細相同算法（扣最後一刀鋸縫及尾端修邊）
+        rem_mm = layout_row_left(L, row)
+        if rem_mm > 0:
+            kx1 = cur_x + kerf*scale
+            sx1 = kx1 + rem_mm*scale
+            drawer.rect(cur_x, cur_y, kx1, cur_y+row_h, fill="#FFD966")
+            draw_scrap_block(drawer, kx1, cur_y, sx1, cur_y+row_h)
             scrap_ref = row.get("scrap_ref")
             no_str = scrap_ref.get("_no", "") if scrap_ref else ""
-            label = f"♻ {no_str} {rem_mm:.0f}mm" if no_str else f"♻ 餘料 {rem_mm:.0f}mm"
-            if (x1-cur_x) > 55 and row_h > 28:
+            label = f"♻ {no_str} {rem_mm}mm" if no_str else f"♻ 餘料 {rem_mm}mm"
+            if (sx1-kx1) > 55 and row_h > 28:
                 fs2 = max(9, min(13, int(row_h/4)))
-                drawer.text((cur_x+x1)/2, cur_y+row_h/2, label,
+                drawer.text((kx1+sx1)/2, cur_y+row_h/2, label,
                             font_size=fs2, bold=True, fill="#B45309")
 
         # 排次標籤：兩行（排N / W零件寬），置中對齊該排，確保不跟板寬文字重疊
@@ -1672,17 +1704,20 @@ def render_layout(drawer, layout, zoom=1.0):
         drawer.text(label_cx, row_mid + 10, f"W{part_w}", font_size=10, fill="#555")
 
         cur_y += row_h
-        if ri < len(rows) - 1:
-            drawer.line(x0, cur_y, x1, cur_y, fill="#999", width=1, dash=(2,2))
 
-    if cur_y < y1:
-        draw_scrap_block(drawer, x0, cur_y, x1, y1)
+    # 寬度方向餘料：與切割明細相同算法（扣一刀鋸縫及另一側修邊）
+    wrem = layout_width_left(L)
+    if wrem > 0:
+        ky1 = cur_y + kerf*scale
+        sy1 = ky1 + wrem*scale
+        drawer.rect(x0, cur_y, x1, ky1, fill="#FFD966")
+        draw_scrap_block(drawer, x0, ky1, x1, sy1)
         width_ref = L.get("width_scrap_ref")
         no_str = width_ref.get("_no", "") if width_ref else ""
-        label = f"♻ {no_str} 寬度方向餘料 {(y1-cur_y)/scale:.0f}mm" if no_str \
-                else f"♻ 寬度方向餘料 {(y1-cur_y)/scale:.0f}mm"
-        if (y1 - cur_y) > 20:
-            drawer.text((x0+x1)/2, (cur_y+y1)/2, label, font_size=12, bold=True, fill="#B45309")
+        label = f"♻ {no_str} 寬度方向餘料 {wrem}mm" if no_str \
+                else f"♻ 寬度方向餘料 {wrem}mm"
+        if (sy1 - ky1) > 20:
+            drawer.text((x0+x1)/2, (ky1+sy1)/2, label, font_size=12, bold=True, fill="#B45309")
 
     return scale, margin, (x0, y0, x1, y1)
 
@@ -1737,7 +1772,8 @@ class LayoutWindow(tk.Toplevel):
         # 圖例
         legend = tk.Frame(self, bg=CLR_BG)
         legend.pack(fill="x", padx=12, pady=(8, 0))
-        for color, text in [("#4A90D9", "零件"), ("#FDE7C8", "♻ 餘料/邊料"), ("#FFD966", "切割縫(kerf)")]:
+        for color, text in [("#4A90D9", "零件"), ("#FDE7C8", "♻ 餘料"), (LAYOUT_EDGE_CLR, "修邊"),
+                            ("#FFD966", "切割縫(kerf)")]:
             box = tk.Frame(legend, bg=color, width=18, height=18,
                            highlightbackground="#DC6803" if color=="#FDE7C8" else color,
                            highlightthickness=2 if color=="#FDE7C8" else 0)
@@ -4097,11 +4133,11 @@ class PurchaseEditWindow(tk.Toplevel):
             if layout:
                 part_w   = layout.get("part_w", 0)
                 num_rows = len([r for r in layout.get("rows", []) if r.get("parts")])
-                max_l    = max(
-                    (p["length"] for r in layout.get("rows",[]) for p in r.get("parts",[])),
-                    default=0)
+                # 板長需容納最長的一整排（各段零件 + 段間鋸縫 + 兩端修邊）
+                max_used = max((layout_row_used(layout, r) for r in layout.get("rows", [])),
+                               default=0)
                 need_w = num_rows * part_w + max(0, num_rows-1)*new_kerf + new_trim*2
-                need_l = max_l + new_trim*2
+                need_l = max_used + new_trim
                 return need_w, need_l
 
             # 一般格式：PL厚×寬×長
@@ -4441,90 +4477,83 @@ class PurchaseEditWindow(tk.Toplevel):
                 dim_map[key] = row
 
         new_scraps = []
+        old_scraps = r.get("new_scraps", [])
+
+        def keep_old(ct):
+            """未重新計算的片次（使用現有餘料、或找不到對應採購規格）保留原本產生的餘料"""
+            new_scraps.extend(sc for sc in old_scraps if sc.get("src") == ct["idx"])
+
         for ct in r["cut_details"]:
             if ct.get("is_scrap"):
+                keep_old(ct)
                 continue
 
             # 從 board_spec 取出 thick/width/length
             m = re.match(r"PL(\d+)×(\d+)×(\d+)", ct["board_spec"])
             if not m:
+                keep_old(ct)
                 continue
             ct_key = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
             if ct_key not in dim_map:
+                keep_old(ct)
                 continue
 
             row    = dim_map[ct_key]
+            thick  = row["thick"]
             new_bw = row["width"]
             new_bl = row["length"]
-            new_wt = int(calc_weight(new_bw, row["thick"], new_bl, density))
-            new_spec = self._spec(row)
+            ct["board_spec"] = self._spec(row)
+            ct["board_wt"]   = int(calc_weight(new_bw, thick, new_bl, density))
 
-            # 計算新餘料
             layout = ct.get("layout")
             if layout:
-                part_w   = layout.get("part_w", 0)
-                num_rows = len([rv for rv in layout.get("rows",[]) if rv.get("parts")])
-                used_w   = num_rows * part_w + max(0, num_rows-1)*new_kerf + new_trim*2
-                # 長度方向：取各排中最長已用長度
-                max_used_l = 0
-                for rv in layout.get("rows",[]):
-                    col_l = new_trim
-                    for pp in rv.get("parts",[]):
-                        col_l += pp["length"] + new_kerf
-                    max_used_l = max(max_used_l, col_l - new_kerf)
-                used_l = max_used_l + new_trim
-            else:
-                ps = ct.get("part_spec","")
-                mp = re.match(r"PL(\d+)×(\d+)×(\d+)", ps)
-                if mp:
-                    part_w = int(mp.group(2))
-                    part_l = int(mp.group(3))
-                    qty    = ct.get("qty", 1)
-                    used_w = qty * part_w + (qty-1)*new_kerf + new_trim*2
-                    used_l = part_l + new_trim*2
-                else:
-                    used_w = new_bw
-                    used_l = new_bl
+                # 多段切割：與配料計算（_add_board）相同算法，
+                # 寬度方向一塊 + 每排各自的長度方向餘料；排列圖跟著修改後尺寸更新
+                layout["board_w"] = new_bw
+                layout["board_l"] = new_bl
+                left_specs = []
+
+                def make_scrap(w, l):
+                    wt = round(calc_weight(w, thick, l, density), 0)
+                    left_specs.append(f"PL{thick}×{w}×{l}（{wt}kg）")
+                    obj = {"src": ct["idx"], "type": ct["type"],
+                           "spec": f"PL{thick}×{w}×{l}", "mat": ct["mat"], "wt": int(wt)}
+                    new_scraps.append(obj)
+                    return obj
+
+                wl = layout_width_left(layout)
+                layout["width_scrap_ref"] = make_scrap(wl, new_bl) if wl > 0 else None
+                for rv in layout.get("rows", []):
+                    rl = layout_row_left(layout, rv)
+                    rv["scrap_ref"] = make_scrap(layout["part_w"], rl) if rl > 0 else None
+                ct["leftover"] = "　".join(left_specs) if left_specs else "無餘料"
+                continue
+
+            # 單段切割
+            used_w, used_l = new_bw, new_bl
+            mp = re.match(r"PL(\d+)×(\d+)×(\d+)", ct.get("part_spec", ""))
+            if mp:
+                qty    = ct.get("qty", 1)
+                used_w = qty * int(mp.group(2)) + (qty-1)*new_kerf + new_trim*2
+                used_l = int(mp.group(3)) + new_trim*2
 
             left_w = new_bw - used_w
             left_l = new_bl - used_l
             left_specs = []
-            width_scrap = None
 
             if left_w > 0:
-                lw = round(calc_weight(left_w, row["thick"], new_bl, density), 0)
-                left_specs.append(f"PL{row['thick']}×{left_w}×{new_bl}（{int(lw)}kg）")
-                width_scrap = {
-                    "src":  ct["idx"],
-                    "type": ct["type"],
-                    "spec": f"PL{row['thick']}×{left_w}×{new_bl}",
-                    "mat":  ct["mat"],
-                    "wt":   int(lw)
-                }
-                new_scraps.append(width_scrap)
+                lw = round(calc_weight(left_w, thick, new_bl, density), 0)
+                left_specs.append(f"PL{thick}×{left_w}×{new_bl}（{int(lw)}kg）")
+                new_scraps.append({"src": ct["idx"], "type": ct["type"],
+                                   "spec": f"PL{thick}×{left_w}×{new_bl}",
+                                   "mat": ct["mat"], "wt": int(lw)})
             if left_l > 0:
-                ll = round(calc_weight(new_bw, row["thick"], left_l, density), 0)
-                left_specs.append(f"PL{row['thick']}×{new_bw}×{left_l}（{int(ll)}kg）")
-                new_scraps.append({
-                    "src":  ct["idx"],
-                    "type": ct["type"],
-                    "spec": f"PL{row['thick']}×{new_bw}×{left_l}",
-                    "mat":  ct["mat"],
-                    "wt":   int(ll)
-                })
-            left_spec = "　".join(left_specs) if left_specs else "無餘料"
-
-            ct["board_spec"] = new_spec
-            ct["board_wt"]   = new_wt
-            ct["leftover"]   = left_spec
-
-            # 排列圖跟著修改後尺寸更新；餘料已重新計算，舊的各排餘料參照不再存在於 new_scraps
-            if layout:
-                layout["board_w"] = new_bw
-                layout["board_l"] = new_bl
-                layout["width_scrap_ref"] = width_scrap
-                for rv in layout.get("rows", []):
-                    rv["scrap_ref"] = None
+                ll = round(calc_weight(new_bw, thick, left_l, density), 0)
+                left_specs.append(f"PL{thick}×{new_bw}×{left_l}（{int(ll)}kg）")
+                new_scraps.append({"src": ct["idx"], "type": ct["type"],
+                                   "spec": f"PL{thick}×{new_bw}×{left_l}",
+                                   "mat": ct["mat"], "wt": int(ll)})
+            ct["leftover"] = "　".join(left_specs) if left_specs else "無餘料"
 
         r["new_scraps"] = new_scraps
         return r
