@@ -4242,7 +4242,7 @@ class PurchaseEditWindow(tk.Toplevel):
         self._lim_lbl = tk.Label(self, text="", bg=CLR_BG, fg="#C53030", justify="left",
                                  anchor="w", font=("Microsoft JhengHei", 9))
         self._lim_lbl.pack(fill="x", padx=10)
-        self._ign_lbl = tk.Label(self, text="", bg=CLR_BG, fg="#718096", justify="left",
+        self._ign_lbl = tk.Label(self, text="", bg=CLR_BG, fg="#B7791F", justify="left",
                                  anchor="w", font=("Microsoft JhengHei", 9))
         self._ign_lbl.pack(fill="x", padx=10)
 
@@ -4276,6 +4276,7 @@ class PurchaseEditWindow(tk.Toplevel):
         self.tree.tag_configure("error",   background="#FED7D7")
         self.tree.tag_configure("changed", background="#C6EFCE")
         self.tree.tag_configure("over",    foreground="#C53030")
+        self.tree.tag_configure("ign",     foreground="#B7791F")   # 已忽略的超出採購限制：琥珀色
         total_wt  = 0
         total_qty = 0
         has_error = False
@@ -4288,10 +4289,11 @@ class PurchaseEditWindow(tk.Toplevel):
             changed = (row["width"]  != row.get("orig_width",  row["width"]) or
                        row["length"] != row.get("orig_length", row["length"]))
             iss = self._limit_issues(row)
+            ign_iss = {"width": "", "length": "", "wt": ""}
             all_msgs = self._limit_msgs(iss)
             if all_msgs and self._is_ignored(row):
                 ignored.append(f"• NO {i+1}　{self._spec(row)}：{'；'.join(all_msgs)}")
-                iss = {"width": "", "length": "", "wt": ""}   # 已忽略的項目不再標紅
+                iss, ign_iss = ign_iss, iss   # 已忽略的項目不再標紅，改標琥珀色
             lim_msgs = self._limit_msgs(iss)
             if lim_msgs:
                 lims.append(f"• NO {i+1}　{self._spec(row)}：{'；'.join(lim_msgs)}")
@@ -4304,7 +4306,9 @@ class PurchaseEditWindow(tk.Toplevel):
                 tag = ("ok" if i%2==0 else "ok2",)
             if lim_msgs:
                 tag = tag + ("over",)
-            mark = lambda k, v: f"⚠{v}" if iss[k] else v
+            elif self._limit_msgs(ign_iss):
+                tag = tag + ("ign",)
+            mark = lambda k, v: f"⚠{v}" if iss[k] else f"◇{v}" if ign_iss[k] else v
             self.tree.insert("", "end", iid=str(i), tags=tag,
                              values=(i+1, row["thick"], mark("width", row["width"]),
                                      mark("length", row["length"]),
@@ -4321,7 +4325,7 @@ class PurchaseEditWindow(tk.Toplevel):
                 txt += ("⚠ 以下項目超出採購限制（紅字 ⚠），請確認是否可採購"
                         "（可選取列後按「忽略超出限制」；未選取則全部忽略）：\n" + "\n".join(lims))
             self._lim_lbl.config(text=txt)
-            self._ign_lbl.config(text=("已忽略的超出採購限制：\n" + "\n".join(ignored)) if ignored else "")
+            self._ign_lbl.config(text=("已忽略的超出採購限制（琥珀色 ◇）：\n" + "\n".join(ignored)) if ignored else "")
         if hasattr(self, "_btn_confirm"):
             if has_error:
                 self._btn_confirm.config(state="disabled", bg="#AAAAAA",

@@ -127,7 +127,10 @@ table.grid{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px
 .grid input.cellbox.over{color:#C53030;font-weight:700;border-color:#C53030;background:#FFF5F5}
 .grid .over-txt{color:#C53030;font-weight:700}
 .pe-lim-row{display:flex;align-items:center;gap:8px;min-height:26px} .pe-lim-row .btn{padding:1px 10px}
-.pe-lim-ign,.pe-lim-ign .pe-lim-row{color:#718096}
+/* 已忽略的超出採購限制：琥珀色，與正常（黑）、未處理（紅）區分 */
+.grid input.cellbox.ign{color:#B7791F;font-weight:700;border-color:#D69E2E;background:#FFFAF0}
+.grid .ign-txt{color:#B7791F;font-weight:700}
+.pe-lim-ign,.pe-lim-ign .pe-lim-row{color:#B7791F}
 .empty{padding:40px 16px;text-align:center;color:var(--muted)}
 .empty b{color:var(--ink)}
 
@@ -2302,17 +2305,20 @@ function openPurchaseEdit() {
       const changed = row.width !== row.orig_width || row.length !== row.orig_length;
       const allMsgs = peLimitMsgs(peLimitIssues(r, row)), ign = allMsgs.length > 0 && peIgnored(row);
       // 已忽略的項目不再標紅
-      const iss = ign ? {width: "", length: "", wt: ""} : peLimitIssues(r, row), limMsgs = peLimitMsgs(iss);
+      const NONE = {width: "", length: "", wt: ""}, raw = peLimitIssues(r, row);
+      const iss = ign ? NONE : raw, ignIss = ign ? raw : NONE, limMsgs = peLimitMsgs(iss);
       if (!ok) { hasErr = true; errs.push(`• NO ${i + 1}　${peSpec(row)}：${msg}`); }
       if (limMsgs.length) lims.push({i, text: `• NO ${i + 1}　${peSpec(row)}：${limMsgs.join("；")}`});
       if (ign) ignored.push({i, text: `• NO ${i + 1}　${peSpec(row)}：${allMsgs.join("；")}`});
       tw += tot; tq += row.qty;
       const tip = [!ok ? msg : "", ...limMsgs].filter(Boolean).join("\n");
-      const box = (k, label) => `<input class="cellbox${iss[k] ? " over" : ""}" ${iss[k] ? `title="${esc(iss[k])}"` : ""} data-k="${k}" value="${row[k]}" inputmode="numeric" aria-label="${label}">`;
+      const cls = k => iss[k] ? " over" : ignIss[k] ? " ign" : "";
+      const tipOf = k => iss[k] || (ignIss[k] ? `已忽略：${ignIss[k]}` : "");
+      const box = (k, label) => `<input class="cellbox${cls(k)}" ${tipOf(k) ? `title="${esc(tipOf(k))}"` : ""} data-k="${k}" value="${row[k]}" inputmode="numeric" aria-label="${label}">`;
       return {cls: !ok ? "error" : changed ? "changed" : (i % 2 ? "even" : "odd"), attrs: `data-i="${i}" ${tip ? `title="${esc(tip)}"` : ""}`,
         cells: [i + 1, row.thick, {html: box("width", "板寬")}, {html: box("length", "板長")},
           row.qty, row.mat,
-          iss.wt ? {html: `<span class="over-txt" title="${esc(iss.wt)}">${Math.trunc(wt)}</span>`} : Math.trunc(wt), Math.trunc(tot),
+          iss.wt || ignIss.wt ? {html: `<span class="${iss.wt ? "over-txt" : "ign-txt"}" title="${esc(tipOf("wt"))}">${Math.trunc(wt)}</span>`} : Math.trunc(wt), Math.trunc(tot),
           {html: `<input class="cellbox note" data-k="note" value="${esc(row.note || "")}" placeholder="（如：調整板片大小說明）" aria-label="備註">`},
           row.orig_spec]};
     });
@@ -2323,7 +2329,7 @@ function openPurchaseEdit() {
     limBox.innerHTML =
       (lims.length ? `<div class="pe-lim-row"><b>⚠ 以下項目超出採購限制（紅字），請確認是否可採購：</b>${lims.length > 1 ? `<button class="btn btn-ghost btn-sm" data-ign="all">全部忽略</button>` : ""}</div>` +
         lims.map(x => limLine(x, `<button class="btn btn-ghost btn-sm" data-ign="${x.i}">忽略</button>`)).join("") : "") +
-      (ignored.length ? `<div class="pe-lim-row pe-lim-ign"><b>已忽略的超出採購限制：</b></div>` +
+      (ignored.length ? `<div class="pe-lim-row pe-lim-ign"><b>已忽略的超出採購限制（琥珀色）：</b></div>` +
         ignored.map(x => `<div class="pe-lim-ign">${limLine(x, `<button class="btn btn-ghost btn-sm" data-unign="${x.i}">取消忽略</button>`)}</div>`).join("") : "");
     const btn = $("[data-a=confirm]", m.foot);
     btn.disabled = hasErr; btn.textContent = hasErr ? "✅ 完成（有錯誤）" : "✅ 完成";
