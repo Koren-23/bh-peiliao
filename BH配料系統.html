@@ -460,6 +460,21 @@ function buildGroups(parts_list) {
 }
 
 /* 單次配料計算（對應 Python _plan_once） */
+/* 多段切割各排的長度方向餘料：相鄰且等長（對齊）的排合併為一塊
+   rems：每排餘料長度（0＝無餘料）→ [{start, end, len}]（start/end 為排索引） */
+function scrapRuns(rems) {
+  var runs = [];
+  rems.forEach(function (v, i) {
+    var last = runs[runs.length - 1];
+    if (v <= 0) return;
+    if (last && last.len === v && last.end === i - 1) last.end = i;
+    else runs.push({start: i, end: i, len: v});
+  });
+  return runs;
+}
+/* 合併後餘料寬度：排寬 × 排數 + 排間鋸縫（餘料未切開，鋸縫寬度仍在） */
+function runWidth(run, part_w, kerf) { var n = run.end - run.start + 1; return n * part_w + (n - 1) * kerf; }
+
 function planOnce(groups, P, existing_scraps, seed) {
   var rng = (seed === null || seed === undefined) ? null : new MT19937(seed);
   var density = P.density, new_kerf = P.new_kerf, new_trim = P.new_trim,
@@ -550,15 +565,14 @@ function planOnce(groups, P, existing_scraps, seed) {
         var lw = pyRound(calcWeight(leftover_w, thick, bl, density), 0);
         left_specs.push("PL" + thick + "×" + leftover_w + "×" + bl + "（" + fmtF(lw) + "kg）");
       }
-      if (col_used_list) {
-        col_used_list.forEach(function (c_used) {
-          var seg_left_l = Math.max(0, bl - c_used - new_trim - new_kerf);
-          if (seg_left_l > 0) {
-            var slw = pyRound(calcWeight(width, thick, seg_left_l, density), 0);
-            left_specs.push("PL" + thick + "×" + width + "×" + seg_left_l + "（" + fmtF(slw) + "kg）");
-          }
-        });
-      }
+      // 長度方向餘料（多段切割）：扣尾端修邊及最後一刀鋸縫；相鄰且等長的排合併成一塊
+      var runs = col_used_list ? scrapRuns(col_used_list.map(function (c_used) {
+        return Math.max(0, bl - c_used - new_trim - new_kerf);
+      })) : [];
+      runs.forEach(function (run) {
+        var rw = runWidth(run, width, new_kerf), slw = pyRound(calcWeight(rw, thick, run.len, density), 0);
+        left_specs.push("PL" + thick + "×" + rw + "×" + run.len + "（" + fmtF(slw) + "kg）");
+      });
       var left_spec = left_specs.length ? left_specs.join("　") : "無餘料";
       var bwt_r = pyRound(bwt, 0);
       var idx = next_idx() + f;
@@ -573,19 +587,15 @@ function planOnce(groups, P, existing_scraps, seed) {
                            mat: taken[0].mat, wt: Math.trunc(lw2)};
         new_scraps.push(width_scrap_obj);
       }
-      var row_scrap_objs = [];
-      if (col_used_list) {
-        col_used_list.forEach(function (c_used) {
-          var seg_left_l = Math.max(0, bl - c_used - new_trim - new_kerf), obj = null;
-          if (seg_left_l > 0) {
-            var slw = pyRound(calcWeight(width, thick, seg_left_l, density), 0);
-            obj = {src: idx, type: taken[0].type, spec: "PL" + thick + "×" + width + "×" + seg_left_l,
+      // 每排對應的餘料物件（合併的排共用同一個物件）
+      var row_scrap_objs = col_used_list ? col_used_list.map(function () { return null; }) : [];
+      runs.forEach(function (run) {
+        var rw = runWidth(run, width, new_kerf), slw = pyRound(calcWeight(rw, thick, run.len, density), 0);
+        var obj = {src: idx, type: taken[0].type, spec: "PL" + thick + "×" + rw + "×" + run.len,
                    mat: taken[0].mat, wt: Math.trunc(slw)};
-            new_scraps.push(obj);
-          }
-          row_scrap_objs.push(obj);
-        });
-      }
+        new_scraps.push(obj);
+        for (var ri = run.start; ri <= run.end; ri++) row_scrap_objs[ri] = obj;
+      });
       var layout = null;
       if (col_parts_layout) {
         layout = {
@@ -1693,6 +1703,7 @@ const LV_EDGE = "#E2E8F0";   // 修邊
 // 排的已用長度（含前端修邊），與配料計算的 col_used 相同
 const layoutRowUsed = (L, row) => L.trim + row.parts.reduce((a, p, i) => a + (i ? L.kerf : 0) + p.length, 0);
 const layoutRowLeft = (L, row) => Math.max(0, L.board_l - layoutRowUsed(L, row) - L.trim - L.kerf);
+const layoutScrapRuns = L => scrapRuns(L.rows.map(rw => layoutRowLeft(L, rw)));
 function layoutWidthLeft(L) {
   const nr = L.rows.filter(x => x.parts && x.parts.length).length;
   return Math.max(0, L.board_w - (nr * L.part_w + Math.max(0, nr - 1) * L.kerf + L.trim * 2) - L.kerf);
@@ -1708,10 +1719,11 @@ function renderLayout(dr, L, zoom) {
   dr.rect(x0, y0, x1, y1, {outline: "#333", width: 2, fill: LV_EDGE});
   dr.text((x0 + x1) / 2, y0 - 28, `板長 ${L.board_l} mm`, {size: 14, bold: true});
   dr.text(LV.LABEL_W_BOARD / 2, (y0 + y1) / 2, `板寬 ${L.board_w} mm`, {size: 13, bold: true, angle: 90});
-  const row_h = L.part_w * scale;
+  const row_h = L.part_w * scale, row_top = [];
   let cur_y = y0 + L.trim * scale;
   L.rows.forEach((row, ri) => {
     if (ri > 0) { dr.rect(x0, cur_y, x1, cur_y + L.kerf * scale, {fill: "#FFD966"}); cur_y += L.kerf * scale; }
+    row_top.push(cur_y);
     let cur_x = x0 + L.trim * scale;
     row.parts.forEach((part, pi) => {
       if (pi > 0) { const kx1 = cur_x + L.kerf * scale; dr.rect(cur_x, cur_y, kx1, cur_y + row_h, {fill: "#FFD966"}); cur_x = kx1; }
@@ -1728,20 +1740,23 @@ function renderLayout(dr, L, zoom) {
       }
       cur_x += pw;
     });
-    // 長度方向餘料：與切割明細相同算法（扣最後一刀鋸縫及尾端修邊）
-    const rem = layoutRowLeft(L, row);
-    if (rem > 0) {
-      const kx1 = cur_x + L.kerf * scale, sx1 = kx1 + rem * scale;
-      dr.rect(cur_x, cur_y, kx1, cur_y + row_h, {fill: "#FFD966"});
-      drawScrapBlock(dr, kx1, cur_y, sx1, cur_y + row_h);
-      const no = row.scrap_ref ? (row.scrap_ref._no || "") : "";
-      const label = no ? `♻ ${no} ${rem}mm` : `♻ 餘料 ${rem}mm`;
-      if ((sx1 - kx1) > 55 && row_h > 28) dr.text((kx1 + sx1) / 2, cur_y + row_h / 2, label, {size: Math.max(9, Math.min(13, Math.trunc(row_h / 4))), bold: true, fill: "#B45309"});
-    }
+    // 最後一段零件後的鋸縫（該排有餘料時）
+    if (layoutRowLeft(L, row) > 0) dr.rect(cur_x, cur_y, cur_x + L.kerf * scale, cur_y + row_h, {fill: "#FFD966"});
     const lcx = x0 - LV.GAP_2 - LV.LABEL_W_ROW / 2, mid = cur_y + row_h / 2;
     dr.text(lcx, mid - 10, `排${ri + 1}`, {size: 13, bold: true});
     dr.text(lcx, mid + 10, `W${L.part_w}`, {size: 10, fill: "#555"});
     cur_y += row_h;
+  });
+  // 長度方向餘料：與切割明細相同算法（扣最後一刀鋸縫及尾端修邊），相鄰等長的排畫成一整塊
+  layoutScrapRuns(L).forEach(run => {
+    const sx1 = x1 - L.trim * scale, kx1 = sx1 - run.len * scale;
+    const sy0 = row_top[run.start], sy1 = row_top[run.end] + row_h;
+    drawScrapBlock(dr, kx1, sy0, sx1, sy1);
+    const ref = L.rows[run.start].scrap_ref, no = ref ? (ref._no || "") : "";
+    const rw = runWidth(run, L.part_w, L.kerf), n = run.end - run.start + 1;
+    const size = n > 1 ? `${rw}×${run.len}mm` : `${run.len}mm`;
+    const label = no ? `♻ ${no} ${size}` : `♻ 餘料 ${size}`;
+    if ((sx1 - kx1) > 55 && row_h > 28) dr.text((kx1 + sx1) / 2, (sy0 + sy1) / 2, label, {size: Math.max(9, Math.min(13, Math.trunc(row_h / 4))), bold: true, fill: "#B45309"});
   });
   // 寬度方向餘料：與切割明細相同算法（扣一刀鋸縫及另一側修邊）
   const wrem = layoutWidthLeft(L);
@@ -1930,6 +1945,11 @@ function buildReportHTML(r) {
   return {styles, body: `<div class="wrap">${s1}${s2}${s3}${s4}${s5}</div>`};
 }
 
+/* 切割明細餘料文字 → 規格清單（去掉重量）："PL20×2087×16440（xxkg）　PL20×1273×1998（xxkg）" → ["PL20×2087×16440", "PL20×1273×1998"] */
+function leftoverSpecs(left) {
+  if (!left || left === "無餘料") return [];
+  return left.split("　").map(s => s.split("（")[0].trim()).filter(Boolean);
+}
 function buildLayoutPrintHTML(r, modifiedSpecs) {
   const p = r.params, sm = serialMap(r), prod = today();
   const PT = 0.352778, W = 210, H = 297, ML = 14, MR = 14, MT = 24, MB = 12, GAP = 5;
@@ -1969,7 +1989,12 @@ function buildLayoutPrintHTML(r, modifiedSpecs) {
         comps.forEach(c => line(`${m[1]}*${m[2]}*${m[3]}*${qty_each}(${sm[c] !== undefined ? sm[c] : c})`));
       } else line(`${ct.part_spec} × ${ct.qty}（${ct.comp}）`);
     }
-    if (left && left !== "無餘料") line(`餘料：${left.split("（")[0]}`, true);
+    // 列出全部餘料（每件一行）；框內放不下時最後一行改為「…另 N 件」
+    const lefts = leftoverSpecs(left);
+    const room = Math.max(0, Math.floor((bottom - ly) / LINE_H) + 1);
+    const shown = lefts.length > room ? lefts.slice(0, Math.max(0, room - 1)) : lefts;
+    shown.forEach((s, i) => line(`${i ? "　　　" : "餘料："}${s}`, true));
+    if (shown.length < lefts.length) line(`${shown.length ? "　　　" : "餘料："}…另 ${lefts.length - shown.length} 件（詳見餘料清單）`, true);
   };
 
   // 按材質分組（保持原始順序），每換一種材質換新頁
@@ -2253,7 +2278,11 @@ function makeModifiedResult(base, rows) {
       };
       const wl = layoutWidthLeft(L);
       L.width_scrap_ref = wl > 0 ? mk(wl, nbl) : null;
-      L.rows.forEach(x => { const rl = layoutRowLeft(L, x); x.scrap_ref = rl > 0 ? mk(L.part_w, rl) : null; });
+      L.rows.forEach(x => { x.scrap_ref = null; });
+      layoutScrapRuns(L).forEach(run => {
+        const obj = mk(runWidth(run, L.part_w, L.kerf), run.len);
+        for (let i = run.start; i <= run.end; i++) L.rows[i].scrap_ref = obj;
+      });
       ct.leftover = specs.length ? specs.join("　") : "無餘料";
       return;
     }
