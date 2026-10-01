@@ -479,6 +479,39 @@ function scrapRuns(rems) {
 /* 合併後餘料寬度：排寬 × 排數 + 排間鋸縫（餘料未切開，鋸縫寬度仍在） */
 function runWidth(run, part_w, kerf) { var n = run.end - run.start + 1; return n * part_w + (n - 1) * kerf; }
 
+/* 一張板（新板或現有餘料）的餘料：新板 / 餘料、單段 / 多段、配料計算 / 採購修正共用
+   col_used：每排已用長度（含前端修邊）。寬度方向扣兩側修邊及一刀鋸縫；
+   長度方向每排扣尾端修邊及最後一刀鋸縫，相鄰等長的排合併成一塊。
+   餘料物件依序加入 new_scraps；回傳 {left_spec, width_obj, row_objs} */
+function boardLeftovers(thick, bw, bl, part_w, trim, kerf, col_used, density, src, type, mat, new_scraps) {
+  var n = col_used.length, specs = [];
+  function mk(w, l) {
+    var wt = pyRound(calcWeight(w, thick, l, density), 0);
+    specs.push("PL" + thick + "×" + w + "×" + l + "（" + fmtF(wt) + "kg）");
+    var obj = {src: src, type: type, spec: "PL" + thick + "×" + w + "×" + l, mat: mat, wt: Math.trunc(wt)};
+    new_scraps.push(obj);
+    return obj;
+  }
+  var lw = Math.max(0, bw - (n * part_w + Math.max(0, n - 1) * kerf + trim * 2) - kerf);
+  var width_obj = lw > 0 ? mk(lw, bl) : null;
+  var row_objs = col_used.map(function () { return null; });
+  scrapRuns(col_used.map(function (c) { return Math.max(0, bl - c - trim - kerf); })).forEach(function (run) {
+    var obj = mk(runWidth(run, part_w, kerf), run.len);
+    for (var ri = run.start; ri <= run.end; ri++) row_objs[ri] = obj;
+  });
+  return {left_spec: specs.length ? specs.join("　") : "無餘料", width_obj: width_obj, row_objs: row_objs};
+}
+/* 排列圖資料（每排的零件 + 對應的餘料物件，供排列圖顯示餘NO） */
+function makeLayout(bw, bl, part_w, thick, trim, kerf, rows, lo) {
+  return {
+    board_w: bw, board_l: bl, part_w: part_w, thick: thick, trim: trim, kerf: kerf,
+    width_scrap_ref: lo.width_obj,
+    rows: rows.map(function (row, ri) {
+      return {parts: row.map(function (p) { return {name: p.name, length: p.length}; }), scrap_ref: lo.row_objs[ri]};
+    })
+  };
+}
+
 function planOnce(groups, P, existing_scraps, seed) {
   var rng = (seed === null || seed === undefined) ? null : new MT19937(seed);
   var density = P.density, new_kerf = P.new_kerf, new_trim = P.new_trim,
@@ -518,7 +551,8 @@ function planOnce(groups, P, existing_scraps, seed) {
       if (sc.used || sc.thick !== thick) continue;
       if ((sc.mat === undefined ? mat : sc.mat) !== mat) continue;
       var usable_w = sc.width - scrap_trim * 2, usable_l = sc.length - scrap_trim * 2;
-      var max_cols_s = Math.max(1, Math.floor((usable_w + scrap_kerf) / (width + scrap_kerf)));
+      if (usable_w < width) continue;   // 餘料寬度不足一排
+      var max_cols_s = Math.floor((usable_w + scrap_kerf) / (width + scrap_kerf));
       var eligible = remaining.filter(function (d) { return d.length <= usable_l; })
                               .sort(function (a, b) { return b.length - a.length; });
       if (!eligible.length) continue;
@@ -528,21 +562,18 @@ function planOnce(groups, P, existing_scraps, seed) {
       used_scrap_ids.add(sc.id);
       var idx = next_idx() + "♻";
       var board_wt = pyRound(calcWeight(sc.width, sc.thick, sc.length, density), 0);
-      var used_bw = fits * width + (fits - 1) * scrap_kerf + scrap_trim * 2;
-      var leftover_w = sc.width - used_bw, left_spec = "無餘料";
-      if (leftover_w > 0) {
-        var lw = pyRound(calcWeight(leftover_w, sc.thick, sc.length, density), 0);
-        left_spec = "PL" + sc.thick + "×" + leftover_w + "×" + sc.length + "（" + fmtF(lw) + "kg）";
-        new_scraps.push({src: idx, type: taken[0].type, spec: "PL" + sc.thick + "×" + leftover_w + "×" + sc.length,
-                         mat: taken[0].mat, wt: Math.trunc(lw)});
-      }
+      // 每排一片；寬度方向與長度方向餘料皆與新板相同算法（扣鋸縫及修邊）
+      var col_used_s = taken.map(function (t) { return scrap_trim + t.length; });
+      var lo = boardLeftovers(sc.thick, sc.width, sc.length, width, scrap_trim, scrap_kerf, col_used_s,
+                              density, idx, taken[0].type, taken[0].mat, new_scraps);
       cut_details.push({
         idx: idx, type: taken[0].type,
         board_spec: "PL" + sc.thick + "×" + sc.width + "×" + sc.length + "（餘料）",
         mat: taken[0].mat, board_wt: Math.trunc(board_wt),
         comp: _uniq(taken.map(function (t) { return t.name; })).join("、"),
         part_spec: "PL" + thick + "×" + width + "×" + _maxLen(taken),
-        qty: fits, unit_wt: taken[0].unit_wt, leftover: left_spec, is_scrap: true
+        qty: fits, unit_wt: taken[0].unit_wt, leftover: lo.left_spec, is_scrap: true,
+        layout: makeLayout(sc.width, sc.length, width, thick, scrap_trim, scrap_kerf, taken.map(function (t) { return [t]; }), lo)
       });
     }
 
@@ -561,60 +592,21 @@ function planOnce(groups, P, existing_scraps, seed) {
         bw = Math.min(Math.trunc(Math.ceil(need_w * 1000 / 10) * 10), bw_max);
         bwt = calcWeight(bw, thick, bl, density);
       }
-      if (bwt > w_max) f = flag + "H";
-      var used_bw = cols * width + (cols - 1) * new_kerf + new_trim * 2;
-      var leftover_w = Math.max(0, bw - used_bw - new_kerf);
-      var left_specs = [];
-      if (leftover_w > 0) {
-        var lw = pyRound(calcWeight(leftover_w, thick, bl, density), 0);
-        left_specs.push("PL" + thick + "×" + leftover_w + "×" + bl + "（" + fmtF(lw) + "kg）");
-      }
-      // 長度方向餘料（多段切割）：扣尾端修邊及最後一刀鋸縫；相鄰且等長的排合併成一塊
-      var runs = col_used_list ? scrapRuns(col_used_list.map(function (c_used) {
-        return Math.max(0, bl - c_used - new_trim - new_kerf);
-      })) : [];
-      runs.forEach(function (run) {
-        var rw = runWidth(run, width, new_kerf), slw = pyRound(calcWeight(rw, thick, run.len, density), 0);
-        left_specs.push("PL" + thick + "×" + rw + "×" + run.len + "（" + fmtF(slw) + "kg）");
-      });
-      var left_spec = left_specs.length ? left_specs.join("　") : "無餘料";
+      if (bwt > w_max) f = f + "H";   // 保留可能已加上的「*」
       var bwt_r = pyRound(bwt, 0);
       var idx = next_idx() + f;
       var board_spec = "PL" + thick + "×" + bw + "×" + bl;
       var comp_str = _uniq(taken.map(function (t) { return t.name; })).join("、");
       var ps = seg_desc ? "PL" + thick + "×" + width + "×多段(" + seg_desc + ")"
                         : "PL" + thick + "×" + width + "×" + _maxLen(taken);
-      var width_scrap_obj = null;
-      if (leftover_w > 0) {
-        var lw2 = pyRound(calcWeight(leftover_w, thick, bl, density), 0);
-        width_scrap_obj = {src: idx, type: taken[0].type, spec: "PL" + thick + "×" + leftover_w + "×" + bl,
-                           mat: taken[0].mat, wt: Math.trunc(lw2)};
-        new_scraps.push(width_scrap_obj);
-      }
-      // 每排對應的餘料物件（合併的排共用同一個物件）
-      var row_scrap_objs = col_used_list ? col_used_list.map(function () { return null; }) : [];
-      runs.forEach(function (run) {
-        var rw = runWidth(run, width, new_kerf), slw = pyRound(calcWeight(rw, thick, run.len, density), 0);
-        var obj = {src: idx, type: taken[0].type, spec: "PL" + thick + "×" + rw + "×" + run.len,
-                   mat: taken[0].mat, wt: Math.trunc(slw)};
-        new_scraps.push(obj);
-        for (var ri = run.start; ri <= run.end; ri++) row_scrap_objs[ri] = obj;
-      });
-      var layout = null;
-      if (col_parts_layout) {
-        layout = {
-          board_w: bw, board_l: bl, part_w: width, thick: thick, trim: new_trim, kerf: new_kerf,
-          width_scrap_ref: width_scrap_obj,
-          rows: col_parts_layout.map(function (row, ri) {
-            return {parts: row.map(function (p) { return {name: p.name, length: p.length}; }),
-                    scrap_ref: ri < row_scrap_objs.length ? row_scrap_objs[ri] : null};
-          })
-        };
-      }
+      // 餘料：寬度方向一塊 + 每排長度方向（相鄰等長的排合併），單段 / 多段相同算法
+      var lo = boardLeftovers(thick, bw, bl, width, new_trim, new_kerf, col_used_list,
+                              density, idx, taken[0].type, taken[0].mat, new_scraps);
       cut_details.push({
         idx: idx, type: taken[0].type, board_spec: board_spec, mat: taken[0].mat,
         board_wt: Math.trunc(bwt_r), comp: comp_str, part_spec: ps, qty: taken.length,
-        unit_wt: taken[0].unit_wt, leftover: left_spec, is_scrap: false, layout: layout
+        unit_wt: taken[0].unit_wt, leftover: lo.left_spec, is_scrap: false,
+        layout: makeLayout(bw, bl, width, thick, new_trim, new_kerf, col_parts_layout, lo)
       });
       purchase_list.push({spec: board_spec, qty: 1, mat: taken[0].mat,
                           unit_wt: Math.trunc(bwt_r), total_wt: Math.trunc(bwt_r)});
@@ -629,7 +621,9 @@ function planOnce(groups, P, existing_scraps, seed) {
         var elig = remaining.filter(function (d) { return d.length <= max_len; });
         var cols = Math.min(max_cols, elig.length), tk = elig.slice(0, cols);
         tk.forEach(function (t) { _pyRemove(remaining, t); });
-        add_board(cols, max_len + new_trim * 2, tk);
+        // 單段：每排一片（各排長度可能不同，短的排尾端留下長度方向餘料）
+        add_board(cols, max_len + new_trim * 2, tk, "", null,
+                  tk.map(function (t) { return new_trim + t.length; }), tk.map(function (t) { return [t]; }));
       }
     } else {
       // 多段切割：長度方向分段排入，充分利用板長
@@ -691,7 +685,7 @@ function planOnce(groups, P, existing_scraps, seed) {
         var placed = col_parts ? [].concat.apply([], col_parts) : [];
         if (!placed.length) {
           var piece = remaining.shift();
-          add_board(1, piece.length + new_trim * 2, [piece]);
+          add_board(1, piece.length + new_trim * 2, [piece], "", null, [new_trim + piece.length], [[piece]]);
           continue;
         }
         placed.forEach(function (p) { _pyRemove(remaining, p); });
@@ -1560,8 +1554,8 @@ function openPreview(r, titleSuffix) {
 
   tabs["切割明細"] = () => {
     const hasLayouts = r.cut_details.some(ct => ct.layout);
-    return `<div class="toolbar"><span class="tip">💡 點兩下「多段切割」片次（或按 📐）可查看實際排列圖</span><span class="grow"></span>
-      ${hasLayouts ? `<button class="btn btn-teal btn-sm" data-a="layoutList">📐 多段排列圖清單（批次下載 / 合併PDF）</button>` : ""}</div>` +
+    return `<div class="toolbar"><span class="tip">💡 點兩下片次（或按 📐）可查看實際排列圖</span><span class="grow"></span>
+      ${hasLayouts ? `<button class="btn btn-teal btn-sm" data-a="layoutList">📐 排列圖清單（批次下載 / 合併PDF）</button>` : ""}</div>` +
       gridHTML(["", "片次", "板別", "採購規格(mm)", "材質", "板重(kg)", "構件（裁切尺寸）", "數量", "單重(kg)", "餘料"],
         r.cut_details.map((ct, i) => ({
           cls: (ct.is_scrap ? "scrap" : zebra(i)) + " clickable", attrs: `data-ct="${i}"`, left: [6, 9],
@@ -1608,7 +1602,7 @@ function openPreview(r, titleSuffix) {
     const tr = e.target.closest("tr[data-ct]"); if (!tr) return;
     const ct = r.cut_details[+tr.dataset.ct];
     if (ct.layout) openLayoutViewer(ct.idx, ct.layout);
-    else showInfo("提示", "此片次為單段切割，無多段排列圖");
+    else showInfo("提示", "此片次沒有排列圖");
   });
 }
 
@@ -1655,7 +1649,7 @@ async function exportInventoryEvents(r) {
 }
 
 /* ═════════════════════════════════════════════════════════════════
-   多段切割排列圖（對應 render_layout / LayoutWindow）
+   切割排列圖（對應 render_layout / LayoutWindow）
    ═════════════════════════════════════════════════════════════════ */
 const LV_FONT = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif';
 const LV_FONT_K = 1.3;   // Tk 字級(pt) → 畫布像素
@@ -1830,10 +1824,10 @@ function openLayoutViewer(idx, L) {
 function openLayoutList(r) {
   assignScrapNumbers(r);
   const layouts = r.cut_details.filter(ct => ct.layout);
-  if (!layouts.length) { showInfo("提示", "目前沒有多段切割片次，無排列圖可預覽。\n（單段切割模式或每片僅排一種長度時不會產生排列圖）"); return; }
+  if (!layouts.length) { showInfo("提示", "目前沒有切割片次，無排列圖可預覽。"); return; }
   const checked = new Set();
   const m = openModal({
-    title: `選擇要預覽／下載的排列圖（共 ${layouts.length} 個多段切割片次）`, size: "md",
+    title: `選擇要預覽／下載的排列圖（共 ${layouts.length} 個片次）`, size: "md",
     bodyHTML: `<div class="toolbar"><button class="btn btn-ghost btn-sm" data-a="all">☑ 全選</button><button class="btn btn-ghost btn-sm" data-a="none">☐ 取消全選</button><span class="grow"></span><span class="count" id="llCount">已選 0 項</span></div>
       <div class="hint">勾選後可批次下載或匯出合併 PDF；點兩下單一列開啟預覽</div><div class="ll-host" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>`,
     footHTML: `<button class="btn btn-primary" data-a="png">💾 批次下載 PNG（ZIP）</button><button class="btn btn-violet" data-a="pdf">📄 匯出合併 PDF</button>`
@@ -1975,7 +1969,7 @@ function buildLayoutPrintHTML(r, modifiedSpecs) {
 
   const drawBox = (x, y, ct) => {
     const mb = specRe.exec(ct.board_spec);
-    const isMod = !!(mb && modifiedSpecs && modifiedSpecs.has(`${+mb[1]},${+mb[2]},${+mb[3]}`));
+    const isMod = !!(mb && modifiedSpecs && modifiedSpecs.has(peBoardKey(+mb[1], +mb[2], +mb[3], ct.mat)));
     const col = isMod ? GREEN : "#000";
     cur.push(T(x, y - 1.5, `${ct.idx} ${ct.board_spec} × ${ct._qty}  PC`, {fill: col}));
     cur.push(`<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${COL_W.toFixed(2)}" height="${BOX_H.toFixed(2)}" fill="none" stroke="${col}" stroke-width="${((isMod ? 1.2 : 0.7) * PT).toFixed(3)}"/>`);
@@ -2222,108 +2216,50 @@ const peIgnore = row => { row.lim_ignored = peLimKey(row); };
 const peActiveLimitMsgs = (r, row) => peIgnored(row) ? [] : peLimitMsgs(peLimitIssues(r, row));
 const askIgnoreLimit = (title, text, okLabel) => dialog({title, text, kind: "warn",
   buttons: [{label: "返回修改", value: false}, {label: okLabel, value: true, cls: "btn-primary"}]});
-function checkSize(r, row, orig_spec) {
+/* 採購列與切割片次的對應鍵：板規格 + 材質（同規格不同材質為不同採購列） */
+const peBoardKey = (t, w, l, mat) => `${t},${w},${l},${mat}`;
+const peRowKey = row => { const mo = specRe.exec(row.orig_spec); return mo ? peBoardKey(+mo[1], +mo[2], +mo[3], row.mat) : null; };
+const ctBoardKey = ct => { const m = specRe.exec(ct.board_spec); return m ? peBoardKey(+m[1], +m[2], +m[3], ct.mat) : null; };
+function checkSize(r, row) {
   const kerf = r.params.new_kerf, trim = r.params.new_trim, cur_w = row.width, cur_l = row.length;
-  const mo = specRe.exec(orig_spec);
-  if (!mo) return [true, ""];
-  const ot = +mo[1], ow = +mo[2], ol = +mo[3];
-  if (cur_w === ow && cur_l === ol) return [true, ""];
-  if (cur_w >= ow && cur_l >= ol) return [true, ""];
-  const errors = []; let matched = false;
-  const dims = ct => {
-    const qty = ct.qty ?? 1, L = ct.layout;
-    if (L) {
-      const nr = L.rows.filter(x => x.parts && x.parts.length).length;
-      // 板長需容納最長的一整排（各段零件 + 段間鋸縫 + 兩端修邊）
-      const max_used = Math.max(0, ...L.rows.map(x => layoutRowUsed(L, x)));
-      return [nr * L.part_w + Math.max(0, nr - 1) * kerf + trim * 2, max_used + trim];
-    }
-    const ps = ct.part_spec || "";
-    const mp = specRe.exec(ps);
-    if (mp) return [qty * +mp[2] + (qty - 1) * kerf + trim * 2, +mp[3] + trim * 2];
-    const mp2 = /^PL(\d+)×(\d+)×多段\((.+)\)/.exec(ps);
-    if (mp2) {
-      const nr = (mp2[3].match(/排/g) || []).length, nums = (mp2[3].match(/\d+/g) || []).map(Number);
-      return [nr * +mp2[2] + Math.max(0, nr - 1) * kerf + trim * 2, (nums.length ? Math.max(...nums) : 0) + trim * 2];
-    }
-    return [null, null];
-  };
-  const check = strict => {
-    r.cut_details.forEach(ct => {
-      if (ct.is_scrap) return;
-      const mb = specRe.exec(ct.board_spec); if (!mb) return;
-      if (+mb[1] !== ot) return;
-      if (strict && +mb[2] !== ow && +mb[3] !== ol) return;
-      const [nw, nl] = dims(ct); if (nw === null || nl === null) return;
-      matched = true;
-      if (cur_w < nw) errors.push(`板寬不足！需要 ${nw}mm，目前 ${cur_w}mm`);
-      if (cur_l < nl) errors.push(`板長不足！需要 ${nl}mm，目前 ${cur_l}mm`);
-    });
-  };
-  check(true);
-  if (!matched) check(false);   // fallback：只比對厚度
-  if (!matched) return [true, ""];
-  if (errors.length) return [false, _uniq(errors).join("；")];
-  return [true, ""];
+  if (cur_w >= row.orig_width && cur_l >= row.orig_length) return [true, ""];
+  // 只檢查實際使用這個採購規格（同規格、同材質）的片次
+  const key = peRowKey(row), errors = [];
+  r.cut_details.forEach(ct => {
+    if (ct.is_scrap || !ct.layout || ctBoardKey(ct) !== key) return;
+    const L = ct.layout, nr = L.rows.filter(x => x.parts && x.parts.length).length;
+    // 板寬需容納所有排（排寬 + 排間鋸縫 + 兩側修邊）；板長需容納最長的一整排（各段零件 + 段間鋸縫 + 兩端修邊）
+    const nw = nr * L.part_w + Math.max(0, nr - 1) * kerf + trim * 2;
+    const nl = Math.max(0, ...L.rows.map(x => layoutRowUsed(L, x))) + trim;
+    if (cur_w < nw) errors.push(`板寬不足！需要 ${nw}mm，目前 ${cur_w}mm`);
+    if (cur_l < nl) errors.push(`板長不足！需要 ${nl}mm，目前 ${cur_l}mm`);
+  });
+  return errors.length ? [false, _uniq(errors).join("；")] : [true, ""];
 }
 function makeModifiedResult(base, rows) {
   const r = structuredClone(base);
-  const p = r.params, density = p.density, trim = p.new_trim, kerf = p.new_kerf;
-  const modified = new Set();
-  rows.forEach(row => {
-    const mo = specRe.exec(row.orig_spec);
-    if (mo && (row.width !== +mo[2] || row.length !== +mo[3])) modified.add(`${row.thick},${row.width},${row.length}`);
-  });
-  r.modified_specs = modified;
+  const density = r.params.density;
+  r.modified_specs = new Set(rows.filter(row => row.width !== row.orig_width || row.length !== row.orig_length)
+                                 .map(row => peBoardKey(row.thick, row.width, row.length, row.mat)));
   r.purchase_list = rows.map(row => { const wt = Math.trunc(peWt(base, row)); return {spec: peSpec(row), qty: row.qty, mat: row.mat, unit_wt: wt, total_wt: wt * row.qty}; });
-  const dim_map = new Map();
-  rows.forEach(row => { const mo = specRe.exec(row.orig_spec); if (mo) dim_map.set(`${+mo[1]},${+mo[2]},${+mo[3]}`, row); });
+  const row_map = new Map();
+  rows.forEach(row => { const k = peRowKey(row); if (k) row_map.set(k, row); });
   const new_scraps = [];
   // 未重新計算的片次（使用現有餘料、或找不到對應採購規格）保留原本產生的餘料
   const keepOld = ct => r.new_scraps.forEach(sc => { if (sc.src === ct.idx) new_scraps.push(sc); });
   r.cut_details.forEach(ct => {
-    if (ct.is_scrap) { keepOld(ct); return; }
-    const m = specRe.exec(ct.board_spec); if (!m) { keepOld(ct); return; }
-    const row = dim_map.get(`${+m[1]},${+m[2]},${+m[3]}`); if (!row) { keepOld(ct); return; }
-    const nbw = row.width, nbl = row.length;
-    const nwt = Math.trunc(calcWeight(nbw, row.thick, nbl, density));
-    const L = ct.layout;
-    ct.board_spec = peSpec(row); ct.board_wt = nwt;
-    if (L) {
-      // 多段切割：與配料計算（add_board）相同算法，寬度方向一塊 + 每排各自的長度方向餘料
-      L.board_w = nbw; L.board_l = nbl;
-      const specs = [], mk = (w, l) => {
-        const wt = pyRound(calcWeight(w, row.thick, l, density), 0);
-        specs.push(`PL${row.thick}×${w}×${l}（${fmtF(wt)}kg）`);
-        const obj = {src: ct.idx, type: ct.type, spec: `PL${row.thick}×${w}×${l}`, mat: ct.mat, wt: Math.trunc(wt)};
-        new_scraps.push(obj);
-        return obj;
-      };
-      const wl = layoutWidthLeft(L);
-      L.width_scrap_ref = wl > 0 ? mk(wl, nbl) : null;
-      L.rows.forEach(x => { x.scrap_ref = null; });
-      layoutScrapRuns(L).forEach(run => {
-        const obj = mk(runWidth(run, L.part_w, L.kerf), run.len);
-        for (let i = run.start; i <= run.end; i++) L.rows[i].scrap_ref = obj;
-      });
-      ct.leftover = specs.length ? specs.join("　") : "無餘料";
-      return;
-    }
-    let used_w = nbw, used_l = nbl;
-    const mp = specRe.exec(ct.part_spec || "");
-    if (mp) { const q = ct.qty ?? 1; used_w = q * +mp[2] + (q - 1) * kerf + trim * 2; used_l = +mp[3] + trim * 2; }
-    const lw_ = nbw - used_w, ll_ = nbl - used_l, specs = [];
-    if (lw_ > 0) {
-      const lw = Math.trunc(pyRound(calcWeight(lw_, row.thick, nbl, density), 0));
-      specs.push(`PL${row.thick}×${lw_}×${nbl}（${lw}kg）`);
-      new_scraps.push({src: ct.idx, type: ct.type, spec: `PL${row.thick}×${lw_}×${nbl}`, mat: ct.mat, wt: lw});
-    }
-    if (ll_ > 0) {
-      const ll = Math.trunc(pyRound(calcWeight(nbw, row.thick, ll_, density), 0));
-      specs.push(`PL${row.thick}×${nbw}×${ll_}（${ll}kg）`);
-      new_scraps.push({src: ct.idx, type: ct.type, spec: `PL${row.thick}×${nbw}×${ll_}`, mat: ct.mat, wt: ll});
-    }
-    ct.leftover = specs.length ? specs.join("　") : "無餘料";
+    const row = ct.is_scrap || !ct.layout ? null : row_map.get(ctBoardKey(ct));
+    if (!row) { keepOld(ct); return; }
+    const L = ct.layout, nbw = row.width, nbl = row.length;
+    ct.board_spec = peSpec(row);
+    ct.board_wt = Math.trunc(calcWeight(nbw, row.thick, nbl, density));
+    // 與配料計算相同算法重算餘料；排列圖跟著修改後尺寸更新
+    L.board_w = nbw; L.board_l = nbl;
+    const lo = boardLeftovers(row.thick, nbw, nbl, L.part_w, L.trim, L.kerf, L.rows.map(x => layoutRowUsed(L, x)),
+                              density, ct.idx, ct.type, ct.mat, new_scraps);
+    L.width_scrap_ref = lo.width_obj;
+    L.rows.forEach((x, i) => { x.scrap_ref = lo.row_objs[i]; });
+    ct.leftover = lo.left_spec;
   });
   r.new_scraps = new_scraps;
   return r;
@@ -2342,7 +2278,7 @@ function openPurchaseEdit() {
     const rows = S.peRows; let tw = 0, tq = 0, hasErr = false; const errs = [], lims = [], ignored = [];
     const html = rows.map((row, i) => {
       const wt = peWt(r, row), tot = wt * row.qty;
-      const [ok, msg] = checkSize(r, row, row.orig_spec);
+      const [ok, msg] = checkSize(r, row);
       const changed = row.width !== row.orig_width || row.length !== row.orig_length;
       const allMsgs = peLimitMsgs(peLimitIssues(r, row)), ign = allMsgs.length > 0 && peIgnored(row);
       // 已忽略的項目不再標紅
@@ -2380,7 +2316,7 @@ function openPurchaseEdit() {
     try { v = pyInt(inp.value); if (v < 1 || v > 99999) throw new Error(); }
     catch (err) { showWarn("輸入錯誤", `請輸入 1 ~ 99999 之間的整數（mm）。`); inp.value = row[k]; return; }
     row[k] = v; refresh();
-    const [ok, msg] = checkSize(r, row, row.orig_spec);
+    const [ok, msg] = checkSize(r, row);
     const limMsgs = peActiveLimitMsgs(r, row);
     if (!ok) showWarn("尺寸不足", `⚠ 鐵板片數不足，無法裁切！\n\n${msg}\n\n請調大板寬或板長。` +
                       (limMsgs.length ? `\n\n另外超出採購限制：\n${limMsgs.join("\n")}` : ""));
@@ -2409,7 +2345,7 @@ function openPurchaseEdit() {
       t += "\ncut_details board_spec → parsed key:\n";
       r.cut_details.forEach(ct => { if (ct.is_scrap) return; const mm = specRe.exec(ct.board_spec); t += mm ? `  ${ct.board_spec} → (${+mm[1]}, ${+mm[2]}, ${+mm[3]})\n` : `  ${ct.board_spec} → ❌ no match\n`; });
       t += "\n_check_size 結果:\n";
-      S.peRows.forEach(row => { const [ok, er] = checkSize(r, row, row.orig_spec); t += `  ${row.orig_spec} → ${ok ? "✅" : "❌ " + er}\n`; });
+      S.peRows.forEach(row => { const [ok, er] = checkSize(r, row); t += `  ${row.orig_spec} → ${ok ? "✅" : "❌ " + er}\n`; });
       t += "\n_make_modified_result leftover:\n";
       makeModifiedResult(r, S.peRows).cut_details.forEach(ct => { if (!ct.is_scrap) t += `  ${ct.board_spec} leftover=${ct.leftover ?? "?"}\n`; });
       const dm = openModal({title: "診斷", size: "md", bodyHTML: `<pre class="diag">${esc(t)}</pre>`});
@@ -2417,7 +2353,7 @@ function openPurchaseEdit() {
     }
     if (a === "confirm") {
       const errors = [];
-      S.peRows.forEach(row => { const [ok, msg] = checkSize(r, row, row.orig_spec); if (!ok) errors.push(`• PL${row.thick}×${row.width}×${row.length}：${msg}`); });
+      S.peRows.forEach(row => { const [ok, msg] = checkSize(r, row); if (!ok) errors.push(`• PL${row.thick}×${row.width}×${row.length}：${msg}`); });
       if (errors.length) { showError("無法完成 — 尺寸不足", `以下項目尺寸不足（紅色底色），無法裁切：\n\n${errors.join("\n")}\n\n請調大板寬或板長後再完成。`); return; }
       const lims = [], limRows = [];
       S.peRows.forEach(row => { const ms = peActiveLimitMsgs(r, row); if (ms.length) { limRows.push(row); lims.push(`• ${peSpec(row)}：${ms.join("；")}`); } });
