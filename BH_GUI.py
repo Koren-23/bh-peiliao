@@ -4489,17 +4489,19 @@ class PurchaseEditWindow(tk.Toplevel):
             left_w = new_bw - used_w
             left_l = new_bl - used_l
             left_specs = []
+            width_scrap = None
 
             if left_w > 0:
                 lw = round(calc_weight(left_w, row["thick"], new_bl, density), 0)
                 left_specs.append(f"PL{row['thick']}×{left_w}×{new_bl}（{int(lw)}kg）")
-                new_scraps.append({
+                width_scrap = {
                     "src":  ct["idx"],
                     "type": ct["type"],
                     "spec": f"PL{row['thick']}×{left_w}×{new_bl}",
                     "mat":  ct["mat"],
                     "wt":   int(lw)
-                })
+                }
+                new_scraps.append(width_scrap)
             if left_l > 0:
                 ll = round(calc_weight(new_bw, row["thick"], left_l, density), 0)
                 left_specs.append(f"PL{row['thick']}×{new_bw}×{left_l}（{int(ll)}kg）")
@@ -4515,6 +4517,14 @@ class PurchaseEditWindow(tk.Toplevel):
             ct["board_spec"] = new_spec
             ct["board_wt"]   = new_wt
             ct["leftover"]   = left_spec
+
+            # 排列圖跟著修改後尺寸更新；餘料已重新計算，舊的各排餘料參照不再存在於 new_scraps
+            if layout:
+                layout["board_w"] = new_bw
+                layout["board_l"] = new_bl
+                layout["width_scrap_ref"] = width_scrap
+                for rv in layout.get("rows", []):
+                    rv["scrap_ref"] = None
 
         r["new_scraps"] = new_scraps
         return r

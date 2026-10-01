@@ -2234,10 +2234,12 @@ function makeModifiedResult(base, rows) {
       else { used_w = nbw; used_l = nbl; }
     }
     const lw_ = nbw - used_w, ll_ = nbl - used_l, specs = [];
+    let width_scrap = null;
     if (lw_ > 0) {
       const lw = Math.trunc(pyRound(calcWeight(lw_, row.thick, nbl, density), 0));
       specs.push(`PL${row.thick}×${lw_}×${nbl}（${lw}kg）`);
-      new_scraps.push({src: ct.idx, type: ct.type, spec: `PL${row.thick}×${lw_}×${nbl}`, mat: ct.mat, wt: lw});
+      width_scrap = {src: ct.idx, type: ct.type, spec: `PL${row.thick}×${lw_}×${nbl}`, mat: ct.mat, wt: lw};
+      new_scraps.push(width_scrap);
     }
     if (ll_ > 0) {
       const ll = Math.trunc(pyRound(calcWeight(nbw, row.thick, ll_, density), 0));
@@ -2245,6 +2247,12 @@ function makeModifiedResult(base, rows) {
       new_scraps.push({src: ct.idx, type: ct.type, spec: `PL${row.thick}×${nbw}×${ll_}`, mat: ct.mat, wt: ll});
     }
     ct.board_spec = peSpec(row); ct.board_wt = nwt; ct.leftover = specs.length ? specs.join("　") : "無餘料";
+    // 排列圖跟著修改後尺寸更新；餘料已重新計算，舊的各排餘料參照不再存在於 new_scraps
+    if (L) {
+      L.board_w = nbw; L.board_l = nbl;
+      L.width_scrap_ref = width_scrap;
+      L.rows.forEach(x => { x.scrap_ref = null; });
+    }
   });
   r.new_scraps = new_scraps;
   return r;
