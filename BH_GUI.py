@@ -2552,14 +2552,6 @@ class BHPeilianApp(tk.Tk):
 
         tk.Frame(edit_bar, bg="#E8935A", height=1).pack(fill="x", padx=8, pady=(8,4))
 
-        tk.Label(edit_bar, text="新預覽", bg="#CD853F", fg="#FBD38D",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
-
-        edit_btn("🔍 配料結果", self._new_preview_result)
-        edit_btn("🗂 排列圖",   self._new_preview_layout)
-
-        tk.Frame(edit_bar, bg="#E8935A", height=1).pack(fill="x", padx=8, pady=(8,4))
-
         tk.Label(edit_bar, text="匯出", bg="#CD853F", fg="#FBD38D",
                  font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
 
@@ -2574,15 +2566,17 @@ class BHPeilianApp(tk.Tk):
         edit_exp_btn("🗂 排列圖PDF", self._new_export_layout, "#8C6D3F", "#6B5230")
         edit_exp_btn("🖨 匯出PDF",   self._new_export_pdf,    "#744210", "#5A3200")
         edit_exp_btn("💾 匯出Excel", self._new_export_xlsx,   "#4A6741", "#3A5232")
+        edit_btn("📝 信暐訂購單", self._open_order_select)
 
         tk.Frame(edit_bar, bg="#E8935A", height=1).pack(fill="x", padx=8, pady=(8,4))
 
-        tk.Label(edit_bar, text="訂購單", bg="#CD853F", fg="#FBD38D",
+        tk.Label(edit_bar, text="新預覽", bg="#CD853F", fg="#FBD38D",
                  font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
 
-        edit_btn("📝 信暐訂購單", self._open_order_select)
+        edit_btn("🔍 配料結果", self._new_preview_result)
+        edit_btn("🗂 排列圖",   self._new_preview_layout)
 
-        # 紫色右側欄（匯入/匯出/空白表單/預覽）
+        # 紫色右側欄（匯入/匯出/預覽/空白表單）
         export_bar = tk.Frame(self, bg="#6B5B95", width=110)
         export_bar.pack(side="right", fill="y", padx=(0,0), pady=0)
         export_bar.pack_propagate(False)
@@ -2625,24 +2619,6 @@ class BHPeilianApp(tk.Tk):
         # 分隔線
         tk.Frame(export_bar, bg="#6B46C1", height=1).pack(fill="x", padx=8, pady=(8,4))
 
-        # 空白表單區塊
-        tk.Label(export_bar, text="空白表單", bg="#6B5B95", fg="#FBD38D",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
-
-        def blank_btn(text, cmd):
-            tk.Button(export_bar, text=text, command=cmd,
-                      bg="#8C6D3F", fg="white", activebackground="#9C4221",
-                      font=("Microsoft JhengHei", 10, "bold"),
-                      relief="flat", cursor="hand2",
-                      width=10, pady=8
-                      ).pack(fill="x", padx=8, pady=4)
-
-        blank_btn("📄 空白配料表", self._download_blank_csv)
-        blank_btn("📄 空白餘料表", self._sc_download_blank)
-
-        # 分隔線
-        tk.Frame(export_bar, bg="#6B46C1", height=1).pack(fill="x", padx=8, pady=(8,4))
-
         # 預覽區塊
         tk.Label(export_bar, text="預覽", bg="#6B5B95", fg="#FBD38D",
                  font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
@@ -2657,6 +2633,24 @@ class BHPeilianApp(tk.Tk):
 
         preview_btn("🔍 配料結果", self._preview)
         preview_btn("📐 排列圖",   self._preview_layout)
+
+        # 分隔線
+        tk.Frame(export_bar, bg="#6B46C1", height=1).pack(fill="x", padx=8, pady=(8,4))
+
+        # 空白表單區塊
+        tk.Label(export_bar, text="空白表單", bg="#6B5B95", fg="#FBD38D",
+                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
+
+        def blank_btn(text, cmd):
+            tk.Button(export_bar, text=text, command=cmd,
+                      bg="#8C6D3F", fg="white", activebackground="#9C4221",
+                      font=("Microsoft JhengHei", 10, "bold"),
+                      relief="flat", cursor="hand2",
+                      width=10, pady=8
+                      ).pack(fill="x", padx=8, pady=4)
+
+        blank_btn("📄 空白配料表", self._download_blank_csv)
+        blank_btn("📄 空白餘料表", self._sc_download_blank)
 
         # 清除全部放在匯出欄最底部
         tk.Frame(export_bar, bg="#6B5B95").pack(fill="both", expand=True)
