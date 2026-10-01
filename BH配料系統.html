@@ -1,0 +1,2517 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BH 型鋼鋼板配料系統</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231A3050'/%3E%3Cpath d='M7 7h18v4h-7v10h7v4H7v-4h7V11H7z' fill='%2390CDF4'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#F0F4F8; --surface:#FFFFFF; --ink:#1A202C; --muted:#718096; --line:#CBD5E0;
+  --navy:#1A3050; --navy2:#1E3A5F; --sky:#90CDF4;
+  --primary:#2B6CB0; --danger:#7A3535; --green:#4A6741; --teal:#3D6B6B; --slate:#4A6C7A;
+  --violet:#6B46C1; --violet-bar:#6B5B95; --brown:#8C6D3F; --rust:#744210; --rose:#C06080; --orange-bar:#CD853F;
+  --row-odd:#F7FAFC; --row-even:#EBF4FF; --row-comp:#D6EAF8; --row-scrap:#D4EDDA; --row-unused:#FFF3CD;
+  --row-error:#FED7D7; --row-changed:#C6EFCE; --row-sel:#BEE3F8;
+  --font:"Microsoft JhengHei","微軟正黑體","PingFang TC","Noto Sans TC",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:var(--font);font-size:14px;color:var(--ink);background:var(--bg);display:flex;flex-direction:column;min-height:100vh}
+button{font-family:inherit}
+[hidden]{display:none!important}
+
+/* ── header ── */
+.app-hdr{background:var(--navy);color:#fff;display:flex;align-items:center;gap:12px 20px;padding:8px 16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px}
+.brand h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.5px}
+.brand .ver{color:var(--sky);font-size:12px}
+.file-ind{font-size:13px;color:#CBD5E0;padding:3px 10px;border:1px solid #2D4A70;border-radius:999px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-ind.dirty::after{content:" ●";color:#F6AD55}
+.hdr-actions{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+
+/* ── buttons ── */
+.btn{--c:var(--primary);background:var(--c);color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:13.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;line-height:1.2;transition:filter .12s, transform .05s}
+.btn:hover{filter:brightness(1.12)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{background:#A0AEC0;cursor:not-allowed;filter:none}
+.btn:focus-visible{outline:3px solid #F6E05E;outline-offset:1px}
+.btn-sm{padding:5px 10px;font-size:12.5px}
+.btn-lg{padding:10px 20px;font-size:15px}
+.btn-primary{--c:var(--primary)} .btn-danger{--c:var(--danger)} .btn-green{--c:var(--green)} .btn-teal{--c:var(--teal)}
+.btn-slate{--c:var(--slate)} .btn-violet{--c:var(--violet)} .btn-brown{--c:var(--brown)} .btn-rust{--c:var(--rust)}
+.btn-rose{--c:var(--rose)} .btn-gray{--c:#718096} .btn-navy{--c:var(--navy)}
+.btn-ghost{background:#E2E8F0;color:#2D3748}
+.btn-ghost:hover{filter:brightness(.96)}
+
+/* ── layout ── */
+.app-main{flex:1;display:flex;min-height:0}
+.workspace{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.tabs{display:flex;gap:4px;padding:10px 12px 0;border-bottom:2px solid var(--navy);overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{background:#E2E8F0;color:#2D3748;border:0;border-radius:8px 8px 0 0;padding:9px 18px;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{background:var(--navy);color:#fff}
+.panels{flex:1;min-height:0;display:flex;flex-direction:column}
+.panel{flex:1;min-height:0;overflow:auto;padding:12px}
+.panel.tablepanel{display:flex;flex-direction:column;overflow:hidden}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.hint{color:var(--muted);font-size:12.5px;margin:2px 2px 8px}
+.grow{flex:1}
+.count{color:var(--muted);font-size:13px}
+
+.statusbar{background:#E2E8F0;padding:6px 14px;font-size:13px;color:#2D3748;border-top:1px solid var(--line);min-height:30px;display:flex;align-items:center;gap:10px}
+.statusbar .prog{flex:0 0 160px;height:8px;background:#CBD5E0;border-radius:4px;overflow:hidden}
+.statusbar .prog i{display:block;height:100%;width:0;background:var(--primary);transition:width .15s}
+.actionbar{display:flex;gap:8px;padding:10px 12px;align-items:center;flex-wrap:wrap;background:var(--bg)}
+
+/* ── side bars ── */
+.side{width:138px;flex:0 0 138px;overflow-y:auto;padding:8px 8px 14px;display:flex;flex-direction:column;gap:4px}
+.side-a{background:var(--violet-bar)}
+.side-b{background:var(--orange-bar)}
+.side h3{margin:8px 0 2px;font-size:12.5px;color:#FBD38D;text-align:center;letter-spacing:1px}
+.side .sep{height:1px;background:rgba(255,255,255,.28);margin:6px 2px}
+.side .btn{width:100%;justify-content:center;padding:9px 6px;font-size:13.5px}
+.side-title{color:#fff;font-weight:700;text-align:center;font-size:13px;padding:4px 0 2px;border-bottom:1px solid rgba(255,255,255,.3);margin-bottom:2px}
+
+/* ── param form ── */
+.sections{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px;align-items:start;max-width:1200px}
+.sec{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sec h2{margin:0;font-size:14.5px;background:#EDF2F7;color:var(--navy);padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+.sec .body{padding:10px 12px;display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center}
+.sec label.lbl{font-size:13.5px;color:#2D3748;white-space:nowrap}
+.sec input[type=text],.sec input:not([type]),.sec select{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:100%;max-width:260px;background:#fff}
+.sec input:focus,.sec select:focus{outline:2px solid #90CDF4;border-color:#3182CE}
+.sec input.bad{border-color:#E53E3E;background:#FFF5F5}
+.sec .full{grid-column:1/-1}
+.radio{display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer}
+.radio input{margin-top:3px}
+.warn-note{color:#C53030;font-size:12.5px}
+.density{color:var(--slate);font-weight:700}
+
+/* ── grids ── */
+.grid-wrap{flex:1;min-height:0;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+table.grid{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
+.grid th{position:sticky;top:0;z-index:1;background:#D0D8E4;color:var(--navy);font-weight:700;padding:7px 8px;border-bottom:1px solid #A0AEC0;border-right:1px solid #B8C4D4;white-space:nowrap;text-align:center}
+.grid td{padding:5px 8px;border-bottom:1px solid #E2E8F0;border-right:1px solid #EDF2F7;text-align:center;white-space:nowrap}
+.grid tr.odd td{background:var(--row-odd)} .grid tr.even td{background:var(--row-even)}
+.grid tr.comp td{background:var(--row-comp);font-weight:700}
+.grid tr.scrap td{background:var(--row-scrap)} .grid tr.unused td{background:var(--row-unused)}
+.grid tr.error td{background:var(--row-error)} .grid tr.changed td{background:var(--row-changed)}
+.grid tr.picked td{background:var(--row-changed)}
+.grid tr.tot td{background:var(--row-comp);font-weight:700}
+.grid tr.clickable{cursor:pointer}
+.grid tr.clickable:hover td{filter:brightness(.97)}
+.grid td.l{text-align:left}
+.grid td.chk,.grid th.chk{width:36px}
+.grid td.no{color:var(--muted);width:44px}
+/* editable grid */
+.grid.edit td{padding:0}
+.grid.edit td.chk,.grid.edit td.no,.grid.edit td.ro{padding:5px 8px}
+.grid.edit input.cell{width:100%;min-width:70px;border:0;background:transparent;font:inherit;font-size:13.5px;padding:6px 8px;text-align:center;color:inherit}
+.grid.edit input.cell.wide{min-width:190px;text-align:left}
+.grid.edit input.cell:focus{outline:2px solid #3182CE;outline-offset:-2px;background:#fff}
+.grid.edit input.cell.bad{background:#FED7D7;color:#9B2C2C}
+.grid.edit tr.sel td{background:var(--row-sel)!important}
+.grid input.cellbox{width:92px;font:inherit;font-size:13.5px;padding:4px 6px;border:1px solid var(--line);border-radius:5px;text-align:center;background:#fff}
+.grid input.cellbox.note{width:170px;text-align:left}
+.empty{padding:40px 16px;text-align:center;color:var(--muted)}
+.empty b{color:var(--ink)}
+
+/* ── modal ── */
+.m-back{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:100}
+.modal{background:var(--bg);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35);display:flex;flex-direction:column;max-height:calc(100vh - 32px);width:100%;overflow:hidden}
+.m-sm{max-width:480px} .m-md{max-width:720px} .m-lg{max-width:1080px} .m-xl{max-width:1400px;height:calc(100vh - 32px)}
+.m-head{background:var(--navy);color:#fff;display:flex;align-items:center;gap:10px;padding:10px 12px 10px 16px;flex-wrap:wrap}
+.m-title{font-weight:700;font-size:15.5px;flex:1;min-width:0}
+.m-x{background:transparent;border:0;color:#fff;font-size:18px;cursor:pointer;padding:2px 8px;border-radius:6px}
+.m-x:hover{background:rgba(255,255,255,.15)}
+.m-body{flex:1;min-height:0;overflow:auto;padding:14px 16px;display:flex;flex-direction:column}
+.m-foot{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--line);background:#fff;flex-wrap:wrap;align-items:center}
+.m-foot .grow{flex:1}
+.msg{display:flex;gap:12px;align-items:flex-start}
+.msg-ic{font-size:26px;line-height:1}
+.msg-text{white-space:pre-wrap;font-size:14.5px;line-height:1.6;word-break:break-word}
+.form-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center}
+.form-grid input{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:6px;width:100%}
+.ptabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.ptab{background:#E2E8F0;border:0;border-radius:6px;padding:7px 14px;font-weight:700;cursor:pointer;font-size:13.5px;color:#2D3748}
+.ptab[aria-selected="true"]{background:var(--navy);color:#fff}
+.pbody{flex:1;min-height:0;display:flex;flex-direction:column}
+.tip{font-size:12.5px;color:var(--navy);margin:0 0 6px}
+pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12.5px;white-space:pre-wrap;margin:0}
+
+/* layout viewer */
+.lv-legend{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:13.5px}
+.lv-legend .sw{display:inline-block;width:18px;height:18px;border-radius:3px;vertical-align:middle;margin-right:5px}
+.lv-canvas{flex:1;min-height:200px;overflow:auto;background:#fff;border:1px solid #999;border-radius:6px}
+.lv-canvas canvas{display:block}
+.zoom{display:flex;align-items:center;gap:4px;margin-left:auto}
+.zoom span{min-width:46px;text-align:center;font-size:13px}
+
+/* order preview */
+.order-sheet{background:#fff;border:1px solid var(--line);padding:16px;font-family:"DFKai-SB","標楷體","BiauKai",serif;color:#000;overflow:auto}
+.order-sheet h2{text-align:center;margin:0;font-size:22px;letter-spacing:4px}
+.order-sheet h3{text-align:center;margin:4px 0 10px;font-size:20px;letter-spacing:10px}
+.order-sheet .info{font-size:14px;margin:4px 0;white-space:pre-wrap}
+.order-sheet table{border-collapse:collapse;width:100%;font-size:14px;margin-top:6px}
+.order-sheet th,.order-sheet td{border:1px solid #000;padding:3px 6px;height:26px}
+.order-sheet td.c{text-align:center}
+.order-sheet td.notes{vertical-align:top;white-space:pre-wrap;width:26%;font-size:13px}
+
+/* ── responsive ── */
+@media (max-width: 980px){
+  body{height:auto}
+  .app-main{flex-direction:column}
+  .workspace{min-height:70vh}
+  .side{width:auto;flex:none;flex-direction:row;flex-wrap:wrap;padding:10px 12px}
+  .side h3{width:100%;text-align:left;margin:6px 0 0}
+  .side .sep{display:none}
+  .side .btn{width:auto;flex:1 1 130px}
+  .side-title{width:100%;text-align:left}
+}
+@media (max-width: 560px){
+  .app-hdr{padding:8px 12px}
+  .brand h1{font-size:16px}
+  .panel{padding:10px 8px}
+  .sections{grid-template-columns:1fr}
+  .sec .body{grid-template-columns:1fr}
+  .statusbar .prog{flex-basis:80px}
+}
+</style>
+</head>
+<body>
+
+<header class="app-hdr">
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="#2B6CB0"/><path d="M7 7h18v4h-7v10h7v4H7v-4h7V11H7z" fill="#fff"/></svg>
+    <h1>BH 型鋼鋼板配料系統</h1><span class="ver">v23.0 網頁版</span>
+  </div>
+  <div class="file-ind" id="fileInd" title="目前檔案">新檔案</div>
+  <div class="hdr-actions">
+    <button class="btn btn-violet btn-sm" data-act="open">📁 開啟進度</button>
+    <button class="btn btn-violet btn-sm" data-act="save">💾 儲存進度</button>
+    <button class="btn btn-slate btn-sm" data-act="saveAs">💾 另存新檔</button>
+  </div>
+</header>
+
+<div class="app-main">
+  <section class="workspace">
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="param" aria-selected="true">① 前置參數</button>
+      <button class="tab" role="tab" data-tab="bh" aria-selected="false">② BH配料表 <span id="bhBadge" class="count"></span></button>
+      <button class="tab" role="tab" data-tab="sc" aria-selected="false">③ 現有餘料 <span id="scBadge" class="count"></span></button>
+    </nav>
+    <div class="panels">
+      <!-- ① 前置參數 -->
+      <div class="panel" id="tab-param">
+        <div class="sections">
+          <div class="sec"><h2>工程資訊</h2><div class="body">
+            <label class="lbl" for="p_proj_no">案號：</label><input id="p_proj_no" data-p="proj_no">
+            <label class="lbl" for="p_proj_name">案名：</label><input id="p_proj_name" data-p="proj_name">
+            <label class="lbl" for="p_proj_date">日期(dd.mm.yyyy)：</label><input id="p_proj_date" data-p="proj_date">
+            <label class="lbl" for="p_split_code">拆鈑字串：</label><input id="p_split_code" data-p="split_code" value="A">
+          </div></div>
+          <div class="sec"><h2>材質設定</h2><div class="body">
+            <label class="lbl" for="p_mat">材質：</label>
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><select id="p_mat"></select><span class="density" id="densityLbl"></span></div>
+          </div></div>
+          <div class="sec"><h2>切割損耗設定（mm）</h2><div class="body">
+            <label class="lbl" for="p_new_kerf">新板每刀損耗：</label><input id="p_new_kerf" data-p="new_kerf" data-int value="1" inputmode="numeric">
+            <label class="lbl" for="p_new_trim">新板頭尾損耗（每端）：</label><input id="p_new_trim" data-p="new_trim" data-int value="1" inputmode="numeric">
+            <label class="lbl" for="p_scrap_kerf">餘料每刀損耗：</label><input id="p_scrap_kerf" data-p="scrap_kerf" data-int value="1" inputmode="numeric">
+            <label class="lbl" for="p_scrap_trim">餘料頭尾損耗（每端）：</label><input id="p_scrap_trim" data-p="scrap_trim" data-int value="0" inputmode="numeric">
+          </div></div>
+          <div class="sec"><h2>切割模式</h2><div class="body">
+            <label class="radio full"><input type="radio" name="cut_mode" value="single"> 單段切割　（同一張板只切一種長度）</label>
+            <label class="radio full"><input type="radio" name="cut_mode" value="multi" checked> 多段切割　（同一張板可切不同長度，最省料）</label>
+            <div class="warn-note full">※ 多段切割需確認切割機支援橫向多刀</div>
+          </div></div>
+          <div class="sec"><h2>採購限制（可手動修改）<button class="btn btn-ghost btn-sm" data-act="resetLimits">↺ 恢復預設值</button></h2><div class="body">
+            <label class="lbl" for="p_bw_min">板寬最小值(mm)：</label><input id="p_bw_min" data-p="bw_min" data-int inputmode="numeric">
+            <label class="lbl" for="p_bw_max">板寬最大值(mm)：</label><input id="p_bw_max" data-p="bw_max" data-int inputmode="numeric">
+            <label class="lbl" for="p_bl_min">板長最小值(mm)：</label><input id="p_bl_min" data-p="bl_min" data-int inputmode="numeric">
+            <label class="lbl" for="p_bl_max">板長最大值(mm)：</label><input id="p_bl_max" data-p="bl_max" data-int inputmode="numeric">
+            <label class="lbl" for="p_w_min">最低重量(kg)：</label><input id="p_w_min" data-p="w_min" data-int inputmode="numeric">
+            <label class="lbl" for="p_w_max">最高重量(kg)：</label><input id="p_w_max" data-p="w_max" data-int inputmode="numeric">
+          </div></div>
+        </div>
+      </div>
+
+      <!-- ② BH配料表 -->
+      <div class="panel tablepanel" id="tab-bh" hidden>
+        <div class="toolbar">
+          <button class="btn btn-primary" data-act="bhAdd">＋ 新增列</button>
+          <button class="btn btn-danger" data-act="bhDel">✕ 刪除選取</button>
+          <span class="grow"></span><span class="count" id="bhCount"></span>
+        </div>
+        <div class="hint">✏ 點選儲存格即可直接編輯（Enter 移到下一列，可從 Excel 複製多列貼上）　|　斷面格式：BH高×寬×腹厚×翼厚</div>
+        <div class="grid-wrap"><table class="grid edit" id="bhGrid">
+          <thead><tr><th class="chk"><input type="checkbox" data-selall="bh" aria-label="全選"></th><th>#</th><th>構件編號</th><th>零件編號</th><th>斷面規格</th><th>長度(mm)</th><th>數量</th><th>材質</th></tr></thead>
+          <tbody id="bhBody"></tbody>
+        </table><div class="empty" id="bhEmpty">尚無構件資料。請按 <b>＋ 新增列</b>，或用右側 <b>📂 配料CSV</b> 匯入。</div></div>
+      </div>
+
+      <!-- ③ 現有餘料 -->
+      <div class="panel tablepanel" id="tab-sc" hidden>
+        <div class="toolbar">
+          <button class="btn btn-primary" data-act="scAdd">＋ 新增餘料</button>
+          <button class="btn btn-danger" data-act="scDel">✕ 刪除選取</button>
+          <span class="grow"></span><span class="count" id="scCount"></span>
+        </div>
+        <div class="hint">✏ 點選儲存格即可直接編輯　|　格式：PL厚×寬×長×數量片(材質)</div>
+        <div class="grid-wrap"><table class="grid edit" id="scGrid">
+          <thead><tr><th class="chk"><input type="checkbox" data-selall="sc" aria-label="全選"></th><th>編號</th><th>厚度(mm)</th><th>寬度(mm)</th><th>長度(mm)</th><th>數量(片)</th><th>材質</th></tr></thead>
+          <tbody id="scBody"></tbody>
+        </table><div class="empty" id="scEmpty">目前沒有現有餘料（可不填）。按 <b>＋ 新增餘料</b> 或用 <b>📂 餘料CSV</b> 匯入。</div></div>
+      </div>
+    </div>
+    <div class="statusbar"><span id="status" class="grow">就緒。請填寫前置參數及 BH 配料表後，點擊「執行配料計算」。</span><span class="prog" id="progWrap" hidden><i id="progBar"></i></span></div>
+    <div class="actionbar">
+      <button class="btn btn-primary btn-lg" id="calcBtn" data-act="calc">▶ 執行配料計算</button>
+      <button class="btn btn-danger" id="cancelBtn" data-act="cancelCalc" disabled>取消計算</button>
+      <span class="grow"></span>
+      <button class="btn btn-danger" data-act="clearAll">🗑 清除全部</button>
+    </div>
+  </section>
+
+  <aside class="side side-a" aria-label="原始配料結果">
+    <div class="side-title">配料結果</div>
+    <h3>匯入</h3>
+    <button class="btn btn-slate" data-act="importBh">📂 配料CSV</button>
+    <button class="btn btn-slate" data-act="importSc">📂 餘料CSV</button>
+    <div class="sep"></div>
+    <h3>匯出</h3>
+    <button class="btn btn-violet" data-act="exportLayoutPdf">🗂 排列圖PDF</button>
+    <button class="btn btn-violet" data-act="exportPdf">🖨 匯出 PDF</button>
+    <button class="btn btn-violet" data-act="exportXlsx">💾 匯出Excel</button>
+    <button class="btn btn-violet" data-act="orderOrig">📝 信暐訂購單</button>
+    <div class="sep"></div>
+    <h3>空白表單</h3>
+    <button class="btn btn-brown" data-act="blankBh">📄 空白配料表</button>
+    <button class="btn btn-brown" data-act="blankSc">📄 空白餘料表</button>
+    <div class="sep"></div>
+    <h3>預覽</h3>
+    <button class="btn btn-teal" data-act="preview">🔍 配料結果</button>
+    <button class="btn btn-teal" data-act="previewLayout">📐 排列圖</button>
+  </aside>
+
+  <aside class="side side-b" aria-label="採購修正">
+    <div class="side-title">採購修正</div>
+    <button class="btn btn-rose" data-act="peOpen">📋 新採購清單</button>
+    <div class="sep"></div>
+    <h3>新預覽</h3>
+    <button class="btn btn-rose" data-act="newPreview">🔍 配料結果</button>
+    <button class="btn btn-rose" data-act="newPreviewLayout">🗂 排列圖</button>
+    <div class="sep"></div>
+    <h3>匯出</h3>
+    <button class="btn btn-brown" data-act="newExportLayout">🗂 排列圖PDF</button>
+    <button class="btn btn-rust" data-act="newExportPdf">🖨 匯出PDF</button>
+    <button class="btn btn-green" data-act="newExportXlsx">💾 匯出Excel</button>
+    <div class="sep"></div>
+    <h3>訂購單</h3>
+    <button class="btn btn-rose" data-act="orderNew">📝 信暐訂購單</button>
+  </aside>
+</div>
+
+<input type="file" id="fileInput" hidden>
+
+<!-- ═════════════════════════════════════════════════════════════════
+     計算核心（主畫面與背景 Worker 共用；與 Python 版 BH_GUI.py 逐行對應）
+     ═════════════════════════════════════════════════════════════════ -->
+<script id="core-src">
+"use strict";
+var DENSITY = {"黑鐵板（碳鋼）": 7.85, "不鏽鋼板（304）": 7.93, "不鏽鋼板（316）": 7.98};
+var BW_MIN = 1524, BW_MAX = 2499, BL_MIN = 8000, BL_MAX = 18499, W_MIN = 2600, W_MAX = 12500;
+var CIRCLED = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨","⑩","⑪","⑫","⑬","⑭","⑮","⑯","⑰","⑱","⑲","⑳"];
+
+/* Python round()：以浮點數精確值做「四捨六入五成雙」，確保與 Python 版數值完全一致 */
+function pyRound(x, nd) {
+  nd = nd || 0;
+  if (!isFinite(x)) return x;
+  var neg = x < 0, s = Math.abs(x).toFixed(100);
+  var dot = s.indexOf("."), ip = s.slice(0, dot), fp = s.slice(dot + 1);
+  var tail = fp.slice(nd);
+  if (tail[0] === "5" && /^0*$/.test(tail.slice(1))) {           // 剛好一半 → 取偶數
+    var digits = ip + fp.slice(0, nd);
+    var n = BigInt(digits);
+    if (n % 2n === 1n) n += 1n;
+    var v = Number(n.toString() + "e-" + nd);
+    return neg ? -v : v;
+  }
+  var r = Number(Math.abs(x).toFixed(nd));
+  return neg ? -r : r;
+}
+/* Python 浮點數轉字串（整數值顯示 .0，例如 123.0） */
+function fmtF(x) { return Number.isInteger(x) ? x.toFixed(1) : String(x); }
+
+/* Python random.Random(seed) 的 Mersenne Twister，shuffle 結果與 Python 完全相同 */
+function MT19937(seed) {
+  this.mt = new Uint32Array(624); this.idx = 625;
+  this.initByArray([seed >>> 0]);
+}
+MT19937.prototype.initGenrand = function (s) {
+  var mt = this.mt; mt[0] = s >>> 0;
+  for (var i = 1; i < 624; i++) {
+    var p = mt[i - 1] ^ (mt[i - 1] >>> 30);
+    mt[i] = (Math.imul(1812433253, p) + i) >>> 0;
+  }
+  this.idx = 624;
+};
+MT19937.prototype.initByArray = function (key) {
+  this.initGenrand(19650218);
+  var mt = this.mt, N = 624, i = 1, j = 0, k, p;
+  for (k = Math.max(N, key.length); k > 0; k--) {
+    p = mt[i - 1] ^ (mt[i - 1] >>> 30);
+    mt[i] = ((mt[i] ^ Math.imul(p, 1664525)) + key[j] + j) >>> 0;
+    i++; j++;
+    if (i >= N) { mt[0] = mt[N - 1]; i = 1; }
+    if (j >= key.length) j = 0;
+  }
+  for (k = N - 1; k > 0; k--) {
+    p = mt[i - 1] ^ (mt[i - 1] >>> 30);
+    mt[i] = ((mt[i] ^ Math.imul(p, 1566083941)) - i) >>> 0;
+    i++;
+    if (i >= N) { mt[0] = mt[N - 1]; i = 1; }
+  }
+  mt[0] = 0x80000000;
+};
+MT19937.prototype.next = function () {
+  var mt = this.mt, y, k;
+  if (this.idx >= 624) {
+    for (k = 0; k < 624; k++) {
+      y = (mt[k] & 0x80000000) | (mt[(k + 1) % 624] & 0x7fffffff);
+      mt[k] = mt[(k + 397) % 624] ^ (y >>> 1) ^ ((y & 1) ? 0x9908b0df : 0);
+    }
+    this.idx = 0;
+  }
+  y = mt[this.idx++];
+  y ^= (y >>> 11);
+  y ^= (y << 7) & 0x9d2c5680;
+  y ^= (y << 15) & 0xefc60000;
+  y ^= (y >>> 18);
+  return y >>> 0;
+};
+MT19937.prototype.randbelow = function (n) {
+  var k = 32 - Math.clz32(n), r = this.next() >>> (32 - k);
+  while (r >= n) r = this.next() >>> (32 - k);
+  return r;
+};
+MT19937.prototype.shuffle = function (x) {
+  for (var i = x.length - 1; i >= 1; i--) {
+    var j = this.randbelow(i + 1), t = x[i]; x[i] = x[j]; x[j] = t;
+  }
+};
+
+function parseBH(spec) {
+  spec = String(spec).trim().toUpperCase().split("*").join("×").split("X").join("×");
+  var m = /^BH\s*(\d+)[×x](\d+)[×x](\d+)[×x](\d+)$/.exec(spec);
+  if (!m) return null;
+  var H = +m[1], B = +m[2], tw = +m[3], tf = +m[4];
+  if (H <= 0 || B <= 0 || tw <= 0 || tf <= 0) return null;
+  if (H - 2 * tf <= 0) return null;
+  return [H, B, tw, tf];
+}
+
+function calcWeight(width_mm, thick_mm, length_mm, density) {
+  return width_mm / 1000 * thick_mm / 1000 * length_mm / 1000 * density * 1000;
+}
+
+function decomposeBH(row, density) {
+  var parsed = parseBH(row.spec);
+  if (!parsed) return null;
+  var H = parsed[0], B = parsed[1], tw = parsed[2], tf = parsed[3], hw = H - 2 * tf;
+  var flange = {name: row.comp + "-F", width: B, thick: tf, length: row.length, qty: 2 * row.qty,
+                unit: 2, total: 2 * row.qty, mat: row.mat, spec_str: "PL" + tf + "×" + B + "×" + row.length};
+  var web    = {name: row.comp + "-W", width: hw, thick: tw, length: row.length, qty: row.qty,
+                unit: 1, total: row.qty, mat: row.mat, spec_str: "PL" + tw + "×" + hw + "×" + row.length};
+  [flange, web].forEach(function (part) {
+    var w = calcWeight(part.width, part.thick, part.length, density);
+    part.unit_wt  = pyRound(w, 1);
+    part.total_wt = pyRound(w * part.total, 1);
+  });
+  return {comp: row.comp, part: row.part || "", spec: row.spec, length: row.length, qty: row.qty, mat: row.mat,
+          H: H, B: B, tw: tw, tf: tf, hw: hw, flange: flange, web: web};
+}
+
+function _uniq(arr) { return Array.from(new Set(arr)); }
+function _maxLen(list) { var m = -Infinity; for (var i = 0; i < list.length; i++) if (list[i].length > m) m = list[i].length; return m; }
+function _demandEq(a, b) {
+  return a.name === b.name && a.width === b.width && a.thick === b.thick && a.length === b.length &&
+         a.unit_wt === b.unit_wt && a.mat === b.mat && a.type === b.type;
+}
+/* Python list.remove()：移除第一個「值相等」的項目（不是同一物件） */
+function _pyRemove(list, item) {
+  for (var i = 0; i < list.length; i++) if (_demandEq(list[i], item)) { list.splice(i, 1); return; }
+  throw new Error("list.remove(x): x not in list");
+}
+
+function buildGroups(parts_list) {
+  var map = new Map();
+  parts_list.forEach(function (p) {
+    var key = JSON.stringify([p.thick, p.width, p.mat]);
+    if (!map.has(key)) map.set(key, {thick: p.thick, width: p.width, mat: p.mat, parts: []});
+    map.get(key).parts.push(p);
+  });
+  var arr = Array.from(map.values());
+  arr.sort(function (a, b) {
+    return (a.thick - b.thick) || (a.width - b.width) || (a.mat < b.mat ? -1 : a.mat > b.mat ? 1 : 0);
+  });
+  return arr;
+}
+
+/* 單次配料計算（對應 Python _plan_once） */
+function planOnce(groups, P, existing_scraps, seed) {
+  var rng = (seed === null || seed === undefined) ? null : new MT19937(seed);
+  var density = P.density, new_kerf = P.new_kerf, new_trim = P.new_trim,
+      scrap_kerf = P.scrap_kerf, scrap_trim = P.scrap_trim,
+      bw_min = P.bw_min, bw_max = P.bw_max, bl_min = P.bl_min, bl_max = P.bl_max,
+      w_min = P.w_min, w_max = P.w_max, cut_mode = P.cut_mode;
+
+  var purchase_list = [], cut_details = [], new_scraps = [], used_scrap_ids = new Set(), cut_idx = 0;
+  function next_idx() {
+    var s = cut_idx < CIRCLED.length ? CIRCLED[cut_idx] : "(" + (cut_idx + 1) + ")";
+    cut_idx++; return s;
+  }
+
+  // 餘料依 qty 展開成單片，每片獨立追蹤
+  var remaining_scraps = [];
+  existing_scraps.forEach(function (s) {
+    var qty = parseInt(s.qty === undefined ? 1 : s.qty, 10);
+    for (var i = 0; i < qty; i++) { var piece = Object.assign({}, s); piece._piece_idx = i; remaining_scraps.push(piece); }
+  });
+
+  groups.forEach(function (g) {
+    var thick = g.thick, width = g.width, mat = g.mat;
+    var demand = [];
+    g.parts.forEach(function (p) {
+      for (var k = 0; k < p.total; k++) {
+        demand.push({name: p.name, width: width, thick: thick, length: p.length, unit_wt: p.unit_wt,
+                     mat: p.mat, type: /-F$/.test(p.name) ? "F" : "W"});
+      }
+    });
+    if (rng) rng.shuffle(demand);
+    var remaining = demand.slice();
+
+    // ── 餘料優先 ──
+    for (var si = 0; si < remaining_scraps.length; si++) {
+      var sc = remaining_scraps[si];
+      if (!remaining.length) break;
+      if (sc.used || sc.thick !== thick) continue;
+      if ((sc.mat === undefined ? mat : sc.mat) !== mat) continue;
+      var usable_w = sc.width - scrap_trim * 2, usable_l = sc.length - scrap_trim * 2;
+      var max_cols_s = Math.max(1, Math.floor((usable_w + scrap_kerf) / (width + scrap_kerf)));
+      var eligible = remaining.filter(function (d) { return d.length <= usable_l; })
+                              .sort(function (a, b) { return b.length - a.length; });
+      if (!eligible.length) continue;
+      var fits = Math.min(max_cols_s, eligible.length), taken = eligible.slice(0, fits);
+      taken.forEach(function (t) { _pyRemove(remaining, t); });
+      sc.used = true;
+      used_scrap_ids.add(sc.id);
+      var idx = next_idx() + "♻";
+      var board_wt = pyRound(calcWeight(sc.width, sc.thick, sc.length, density), 0);
+      var used_bw = fits * width + (fits - 1) * scrap_kerf + scrap_trim * 2;
+      var leftover_w = sc.width - used_bw, left_spec = "無餘料";
+      if (leftover_w > 0) {
+        var lw = pyRound(calcWeight(leftover_w, sc.thick, sc.length, density), 0);
+        left_spec = "PL" + sc.thick + "×" + leftover_w + "×" + sc.length + "（" + fmtF(lw) + "kg）";
+        new_scraps.push({src: idx, type: taken[0].type, spec: "PL" + sc.thick + "×" + leftover_w + "×" + sc.length,
+                         mat: taken[0].mat, wt: Math.trunc(lw)});
+      }
+      cut_details.push({
+        idx: idx, type: taken[0].type,
+        board_spec: "PL" + sc.thick + "×" + sc.width + "×" + sc.length + "（餘料）",
+        mat: taken[0].mat, board_wt: Math.trunc(board_wt),
+        comp: _uniq(taken.map(function (t) { return t.name; })).join("、"),
+        part_spec: "PL" + thick + "×" + width + "×" + _maxLen(taken),
+        qty: fits, unit_wt: taken[0].unit_wt, leftover: left_spec, is_scrap: true
+      });
+    }
+
+    // ── 新板裝箱 ──
+    var max_cols = Math.max(1, Math.floor((bw_max + new_kerf) / (width + new_kerf)));
+
+    function add_board(cols, bl, taken, flag, seg_desc, col_used_list, col_parts_layout) {
+      flag = flag || "";
+      var bw = cols * width + (cols - 1) * new_kerf + new_trim * 2;
+      bw = Math.max(bw, bw_min); bw = Math.min(bw, bw_max);
+      bl = Math.max(bl, bl_min); bl = Math.min(bl, bl_max);
+      var bwt = calcWeight(bw, thick, bl, density), f = flag;
+      if (bwt < w_min) {
+        f = flag + "*";
+        var need_w = w_min / (thick / 1000 * bl / 1000 * density * 1000);
+        bw = Math.min(Math.trunc(Math.ceil(need_w * 1000 / 10) * 10), bw_max);
+        bwt = calcWeight(bw, thick, bl, density);
+      }
+      if (bwt > w_max) f = flag + "H";
+      var used_bw = cols * width + (cols - 1) * new_kerf + new_trim * 2;
+      var leftover_w = Math.max(0, bw - used_bw - new_kerf);
+      var left_specs = [];
+      if (leftover_w > 0) {
+        var lw = pyRound(calcWeight(leftover_w, thick, bl, density), 0);
+        left_specs.push("PL" + thick + "×" + leftover_w + "×" + bl + "（" + fmtF(lw) + "kg）");
+      }
+      if (col_used_list) {
+        col_used_list.forEach(function (c_used) {
+          var seg_left_l = Math.max(0, bl - c_used - new_trim - new_kerf);
+          if (seg_left_l > 0) {
+            var slw = pyRound(calcWeight(width, thick, seg_left_l, density), 0);
+            left_specs.push("PL" + thick + "×" + width + "×" + seg_left_l + "（" + fmtF(slw) + "kg）");
+          }
+        });
+      }
+      var left_spec = left_specs.length ? left_specs.join("　") : "無餘料";
+      var bwt_r = pyRound(bwt, 0);
+      var idx = next_idx() + f;
+      var board_spec = "PL" + thick + "×" + bw + "×" + bl;
+      var comp_str = _uniq(taken.map(function (t) { return t.name; })).join("、");
+      var ps = seg_desc ? "PL" + thick + "×" + width + "×多段(" + seg_desc + ")"
+                        : "PL" + thick + "×" + width + "×" + _maxLen(taken);
+      var width_scrap_obj = null;
+      if (leftover_w > 0) {
+        var lw2 = pyRound(calcWeight(leftover_w, thick, bl, density), 0);
+        width_scrap_obj = {src: idx, type: taken[0].type, spec: "PL" + thick + "×" + leftover_w + "×" + bl,
+                           mat: taken[0].mat, wt: Math.trunc(lw2)};
+        new_scraps.push(width_scrap_obj);
+      }
+      var row_scrap_objs = [];
+      if (col_used_list) {
+        col_used_list.forEach(function (c_used) {
+          var seg_left_l = Math.max(0, bl - c_used - new_kerf), obj = null;
+          if (seg_left_l > 0) {
+            var slw = pyRound(calcWeight(width, thick, seg_left_l, density), 0);
+            obj = {src: idx, type: taken[0].type, spec: "PL" + thick + "×" + width + "×" + seg_left_l,
+                   mat: taken[0].mat, wt: Math.trunc(slw)};
+            new_scraps.push(obj);
+          }
+          row_scrap_objs.push(obj);
+        });
+      }
+      var layout = null;
+      if (col_parts_layout) {
+        layout = {
+          board_w: bw, board_l: bl, part_w: width, thick: thick, trim: new_trim, kerf: new_kerf,
+          width_scrap_ref: width_scrap_obj,
+          rows: col_parts_layout.map(function (row, ri) {
+            return {parts: row.map(function (p) { return {name: p.name, length: p.length}; }),
+                    scrap_ref: ri < row_scrap_objs.length ? row_scrap_objs[ri] : null};
+          })
+        };
+      }
+      cut_details.push({
+        idx: idx, type: taken[0].type, board_spec: board_spec, mat: taken[0].mat,
+        board_wt: Math.trunc(bwt_r), comp: comp_str, part_spec: ps, qty: taken.length,
+        unit_wt: taken[0].unit_wt, leftover: left_spec, is_scrap: false, layout: layout
+      });
+      purchase_list.push({spec: board_spec, qty: 1, mat: taken[0].mat,
+                          unit_wt: Math.trunc(bwt_r), total_wt: Math.trunc(bwt_r)});
+    }
+
+    var byLenDesc = function (a, b) { return b.length - a.length; };
+
+    if (cut_mode === "single") {
+      while (remaining.length) {
+        remaining.sort(byLenDesc);
+        var max_len = remaining[0].length;
+        var elig = remaining.filter(function (d) { return d.length <= max_len; });
+        var cols = Math.min(max_cols, elig.length), tk = elig.slice(0, cols);
+        tk.forEach(function (t) { _pyRemove(remaining, t); });
+        add_board(cols, max_len + new_trim * 2, tk);
+      }
+    } else {
+      // 多段切割：長度方向分段排入，充分利用板長
+      var BL_USE = bl_max;
+      var try_arrange = function (pieces, cols) {
+        var col_used = [], col_parts = [], c;
+        for (c = 0; c < cols; c++) { col_used.push(new_trim); col_parts.push([]); }
+        pieces.slice().sort(byLenDesc).forEach(function (piece) {
+          var best_c = null, best_used = Infinity;
+          for (var c2 = 0; c2 < cols; c2++) {
+            var gap = col_parts[c2].length ? new_kerf : 0;
+            var nu = col_used[c2] + gap + piece.length + new_trim;
+            if (nu <= BL_USE && nu < best_used) { best_c = c2; best_used = nu; }
+          }
+          if (best_c !== null) {
+            var gap2 = col_parts[best_c].length ? new_kerf : 0;
+            col_used[best_c] += gap2 + piece.length;
+            col_parts[best_c].push(piece);
+          }
+        });
+        if (!col_parts.some(function (cp) { return cp.length; })) return [null, null];
+        // 互換優化（與 Python 版相同的迭代順序與判斷）
+        var improved = true, itr = 0;
+        while (improved && itr < 50) {
+          improved = false; itr++;
+          for (var ca = 0; ca < cols; ca++) {
+            for (var cb = ca + 1; cb < cols; cb++) {
+              for (var ia = 0; ia < col_parts[ca].length; ia++) {
+                var pa = col_parts[ca][ia];
+                for (var ib = 0; ib < col_parts[cb].length; ib++) {
+                  var pb = col_parts[cb][ib], k, pp;
+                  var nca = new_trim;
+                  for (k = 0; k < col_parts[ca].length; k++) { pp = k === ia ? pb : col_parts[ca][k]; nca += (k > 0 ? new_kerf : 0) + pp.length; }
+                  nca += new_trim;
+                  var ncb = new_trim;
+                  for (k = 0; k < col_parts[cb].length; k++) { pp = k === ib ? pa : col_parts[cb][k]; ncb += (k > 0 ? new_kerf : 0) + pp.length; }
+                  ncb += new_trim;
+                  if (nca <= BL_USE && ncb <= BL_USE) {
+                    var old_max = Math.max(col_used[ca], col_used[cb]);
+                    var new_max = Math.max(nca - new_trim, ncb - new_trim);
+                    if (new_max < old_max) {
+                      col_parts[ca][ia] = pb; col_parts[cb][ib] = pa;
+                      col_used[ca] = nca - new_trim; col_used[cb] = ncb - new_trim;
+                      improved = true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        return [col_parts, col_used];
+      };
+
+      while (remaining.length) {
+        remaining.sort(byLenDesc);
+        var colsM = Math.min(max_cols, remaining.length);
+        var arr = try_arrange(remaining, colsM), col_parts = arr[0], col_used = arr[1];
+        var placed = col_parts ? [].concat.apply([], col_parts) : [];
+        if (!placed.length) {
+          var piece = remaining.shift();
+          add_board(1, piece.length + new_trim * 2, [piece]);
+          continue;
+        }
+        placed.forEach(function (p) { _pyRemove(remaining, p); });
+        var actives = [];
+        for (var c3 = 0; c3 < colsM; c3++) if (col_parts[c3].length) actives.push(c3);
+        var used_cols = actives.length;
+        var bl = (actives.length ? Math.max.apply(null, actives.map(function (c) { return col_used[c]; })) : new_trim) + new_trim;
+        var seg_desc = actives.map(function (c) {
+          return "排" + (c + 1) + ":" + col_parts[c].map(function (p) { return String(p.length); }).join("+");
+        }).join("　");
+        add_board(used_cols, bl, placed, "", seg_desc,
+                  actives.map(function (c) { return col_used[c]; }),
+                  actives.map(function (c) { return col_parts[c]; }));
+      }
+    }
+  });
+
+  return {purchase_list: purchase_list, cut_details: cut_details, new_scraps: new_scraps,
+          used_scrap_ids: Array.from(used_scrap_ids)};
+}
+
+function scoreOf(r) {
+  var a = 0, b = 0;
+  r.purchase_list.forEach(function (p) { a += p.total_wt; });
+  r.new_scraps.forEach(function (s) { b += s.wt; });
+  return [a, b];
+}
+function scoreBetter(s, best) { return !best || s[0] < best[0] || (s[0] === best[0] && s[1] < best[1]); }
+
+/* 跑 iterations 次隨機配料，取「採購總重最輕 + 餘料最少」的最佳方案（對應 Python plan_purchase） */
+function planPurchase(parts_list, P, existing_scraps, iterations, onProgress) {
+  iterations = iterations || 600;
+  var groups = buildGroups(parts_list), best = null, bestScore = null;
+  for (var i = 0; i < iterations; i++) {
+    var r = planOnce(groups, P, existing_scraps, i), s = scoreOf(r);
+    if (scoreBetter(s, bestScore)) { bestScore = s; best = r; }
+    if (onProgress && (i % 5 === 0 || i + 1 === iterations)) onProgress(i + 1, iterations);
+  }
+  return best;
+}
+</script>
+
+<script>
+"use strict";
+/* ═════════════════════════════════════════════════════════════════
+   基本工具
+   ═════════════════════════════════════════════════════════════════ */
+const APP_VER = "v23.0";
+const ORDER_TEMPLATE_B64 = "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";
+const BLANK_BH_CSV_B64 = "ICAgILB0rsayTbPmLCwsLCwNCiAgICCu17i5OiAsLCwsLA0KICAgIK7Xplc6ICwsLCyk6bTBOiwNCiwsLCwsDQogICAgILpjpfO9c7i5ICAgICwgILlzpfO9c7i5ICAsICDCX62xs1eu5iAgICAgICAgICAgICAgICAgICAgICwgICAgqvir1ywsILzGtnEsICAgp/e96A0K";
+const LIBS = {
+  exceljs: "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js",
+  jszip:   "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
+  jspdf:   "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+};
+const LIB_CHECK = {exceljs: () => window.ExcelJS, jszip: () => window.JSZip, jspdf: () => window.jspdf};
+const _libPromises = {};
+function loadLib(name) {
+  if (LIB_CHECK[name]()) return Promise.resolve();
+  if (!_libPromises[name]) {
+    _libPromises[name] = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = LIBS[name];
+      s.onload = () => resolve();
+      s.onerror = () => { delete _libPromises[name]; s.remove();
+        reject(new Error("無法載入匯出元件（" + name + "）。此功能需要網路連線，請確認網路後再試一次。")); };
+      document.head.appendChild(s);
+    });
+  }
+  return _libPromises[name];
+}
+
+const $ = (sel, el = document) => el.querySelector(sel);
+const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
+const esc = s => String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g,
+  c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const pad2 = n => String(n).padStart(2, "0");
+const sum = (arr, f) => arr.reduce((a, x) => a + (f ? f(x) : x), 0);
+const fmtInt = n => Math.round(n).toLocaleString("en-US");
+function nowParts() { const d = new Date(); return {Y: d.getFullYear(), M: pad2(d.getMonth() + 1), D: pad2(d.getDate()), h: pad2(d.getHours()), m: pad2(d.getMinutes()), s: pad2(d.getSeconds())}; }
+const today = () => { const t = nowParts(); return `${t.Y}/${t.M}/${t.D}`; };
+const stamp = () => { const t = nowParts(); return `${t.Y}${t.M}${t.D}_${t.h}${t.m}`; };
+const stampDate = () => { const t = nowParts(); return `${t.Y}${t.M}${t.D}`; };
+const stampFull = () => { const t = nowParts(); return `${t.Y}/${t.M}/${t.D} ${t.h}:${t.m}:${t.s}`; };
+const specRe = /^PL(\d+)×(\d+)×(\d+)/;
+
+function pyInt(v) {
+  const t = String(v === null || v === undefined ? "" : v).trim();
+  if (!/^[+-]?\d+$/.test(t)) throw new Error(`「${v}」不是整數`);
+  return parseInt(t, 10);
+}
+function b64ToBytes(b64) {
+  const bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+function decodeBytes(buf) {
+  const u8 = new Uint8Array(buf);
+  if (u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF) return new TextDecoder("utf-8").decode(u8.subarray(3));
+  try { return new TextDecoder("utf-8", {fatal: true}).decode(u8); } catch (e) { /* 改用 Big5 */ }
+  try { return new TextDecoder("big5", {fatal: true}).decode(u8); } catch (e) { /* 寬鬆解碼 */ }
+  return new TextDecoder("big5").decode(u8);
+}
+function parseCSV(text) {
+  const rows = []; let row = [], f = "", q = false, i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i += 2; continue; } q = false; i++; continue; }
+      f += c; i++; continue;
+    }
+    if (c === '"' && f === "") { q = true; i++; continue; }
+    if (c === ",") { row.push(f); f = ""; i++; continue; }
+    if (c === "\r") { i++; continue; }
+    if (c === "\n") { row.push(f); rows.push(row); row = []; f = ""; i++; continue; }
+    f += c; i++;
+  }
+  if (f !== "" || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+const csvCell = v => { const s = String(v === null || v === undefined ? "" : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const csvLine = arr => arr.map(csvCell).join(",") + "\r\n";
+function download(data, filename, type) {
+  const blob = data instanceof Blob ? data : new Blob([data], {type: type || "application/octet-stream"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+function pickFile(accept) {
+  return new Promise(resolve => {
+    const inp = $("#fileInput");
+    inp.value = ""; inp.accept = accept || "";
+    inp.onchange = () => resolve(inp.files[0] || null);
+    inp.click();
+  });
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   對話框
+   ═════════════════════════════════════════════════════════════════ */
+const modalStack = [];
+function openModal({title, size = "md", bodyHTML = "", footHTML = "", headHTML = ""}) {
+  const back = document.createElement("div");
+  back.className = "m-back";
+  back.innerHTML = `<div class="modal m-${size}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    <div class="m-head"><div class="m-title">${esc(title)}</div>${headHTML}<button class="m-x" aria-label="關閉">✕</button></div>
+    <div class="m-body">${bodyHTML}</div>${footHTML ? `<div class="m-foot">${footHTML}</div>` : ""}</div>`;
+  document.body.appendChild(back);
+  const m = {
+    back, el: back.firstElementChild, body: $(".m-body", back), foot: $(".m-foot", back), head: $(".m-head", back),
+    onClose: null,
+    close() {
+      const i = modalStack.indexOf(m); if (i >= 0) modalStack.splice(i, 1);
+      back.remove(); if (m.onClose) m.onClose();
+    }
+  };
+  $(".m-x", back).onclick = () => m.close();
+  modalStack.push(m);
+  return m;
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && modalStack.length) { e.preventDefault(); modalStack[modalStack.length - 1].close(); }
+});
+const ICONS = {info: "ℹ️", warn: "⚠️", error: "⛔", ok: "✅", question: "❓"};
+function dialog({title, text, kind = "info", buttons}) {
+  buttons = buttons || [{label: "確定", value: true, cls: "btn-primary"}];
+  return new Promise(resolve => {
+    const m = openModal({
+      title, size: "sm",
+      bodyHTML: `<div class="msg"><div class="msg-ic">${ICONS[kind] || ""}</div><div class="msg-text">${esc(text)}</div></div>`,
+      footHTML: `<span class="grow"></span>` + buttons.map((b, i) => `<button class="btn ${b.cls || "btn-ghost"}" data-i="${i}">${esc(b.label)}</button>`).join("")
+    });
+    let done = false;
+    m.onClose = () => { if (!done) resolve(null); };
+    m.foot.addEventListener("click", e => {
+      const b = e.target.closest("button[data-i]"); if (!b) return;
+      done = true; resolve(buttons[+b.dataset.i].value); m.close();
+    });
+    const def = m.foot.querySelector(".btn-primary") || m.foot.querySelector("button");
+    if (def) def.focus();
+  });
+}
+const showInfo  = (title, text) => dialog({title, text, kind: "info"});
+const showOk    = (title, text) => dialog({title, text, kind: "ok"});
+const showWarn  = (title, text) => dialog({title, text, kind: "warn"});
+const showError = (title, text) => dialog({title, text, kind: "error"});
+const askYesNo  = (title, text) => dialog({title, text, kind: "question",
+  buttons: [{label: "否", value: false}, {label: "是", value: true, cls: "btn-primary"}]});
+
+function formDialog(title, fields) {
+  return new Promise(resolve => {
+    const m = openModal({
+      title, size: "sm",
+      bodyHTML: `<form class="form-grid" autocomplete="off">${fields.map(f =>
+        `<label for="fd_${f.key}">${esc(f.label)}</label><input id="fd_${f.key}" name="${f.key}" value="${esc(f.value)}" ${f.numeric ? 'inputmode="numeric"' : ""}>`).join("")}
+        <button type="submit" hidden></button></form>`,
+      footHTML: `<span class="grow"></span><button class="btn btn-ghost" data-a="cancel">取消</button><button class="btn btn-primary" data-a="ok">確定</button>`
+    });
+    let done = false;
+    m.onClose = () => { if (!done) resolve(null); };
+    const submit = () => {
+      const out = {};
+      fields.forEach(f => { out[f.key] = $(`#fd_${f.key}`, m.body).value.trim(); });
+      done = true; resolve(out); m.close();
+    };
+    $("form", m.body).addEventListener("submit", e => { e.preventDefault(); submit(); });
+    m.foot.addEventListener("click", e => {
+      const a = e.target.closest("button")?.dataset.a;
+      if (a === "ok") submit(); else if (a === "cancel") m.close();
+    });
+    const first = $("input", m.body); if (first) { first.focus(); first.select(); }
+  });
+}
+
+function showImportErrors(title, errors) {
+  if (!errors.length) return;
+  const m = openModal({
+    title, size: "md",
+    bodyHTML: `<p style="margin:0 0 8px;font-weight:700">共 ${errors.length} 筆資料未匯入；可選取並複製下方明細。</p><pre class="diag" style="flex:1;overflow:auto">${esc(errors.join("\n"))}</pre>`,
+    footHTML: `<button class="btn btn-slate" data-a="save">儲存錯誤明細</button><button class="btn btn-ghost" data-a="copy">複製</button><span class="grow"></span><button class="btn btn-primary" data-a="close">關閉</button>`
+  });
+  m.foot.addEventListener("click", async e => {
+    const a = e.target.closest("button")?.dataset.a;
+    if (a === "save") download("﻿" + errors.join("\n"), "CSV匯入錯誤明細.txt", "text/plain;charset=utf-8");
+    if (a === "copy") { try { await navigator.clipboard.writeText(errors.join("\n")); setStatus("已複製錯誤明細。"); } catch (err) { /* 無剪貼簿權限時忽略 */ } }
+    if (a === "close") m.close();
+  });
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   應用程式狀態
+   ═════════════════════════════════════════════════════════════════ */
+const S = {
+  bh: [], sc: [],
+  result: null, peRows: null, peResult: null,
+  fileHandle: null, fileName: null, dirty: false,
+  calc: null,
+};
+let UID = 1;
+const PARAM_INT_KEYS = ["new_kerf", "new_trim", "scrap_kerf", "scrap_trim", "bw_min", "bw_max", "bl_min", "bl_max", "w_min", "w_max"];
+const PARAM_STR_KEYS = ["proj_no", "proj_name", "proj_date", "split_code"];
+const BH_FIELDS = ["comp", "part", "spec", "length", "qty", "mat"];
+const SC_FIELDS = ["thick", "width", "length", "qty", "mat"];
+
+function setStatus(t) { $("#status").textContent = t; }
+function markDirty(v = true) { S.dirty = v; updateFileInd(); }
+function updateFileInd() {
+  const el = $("#fileInd");
+  el.textContent = S.fileName || "新檔案";
+  el.classList.toggle("dirty", S.dirty);
+  document.title = `BH 型鋼鋼板配料系統 — ${S.fileName || "新檔案"}`;
+}
+function makeBhRow(d = {}) { return {uid: UID++, sel: false, comp: d.comp ?? "", part: d.part ?? "", spec: d.spec ?? "", length: String(d.length ?? ""), qty: String(d.qty ?? ""), mat: d.mat ?? ""}; }
+function makeScRow(d = {}) { return {uid: UID++, sel: false, no: d.no ?? "", thick: String(d.thick ?? ""), width: String(d.width ?? ""), length: String(d.length ?? ""), qty: String(d.qty ?? ""), mat: d.mat ?? ""}; }
+const rowTag = r => "I" + r.uid.toString(16).toUpperCase().padStart(3, "0");
+
+/* ── 前置參數 ── */
+function initParams() {
+  const sel = $("#p_mat");
+  sel.innerHTML = Object.keys(DENSITY).map(k => `<option>${esc(k)}</option>`).join("");
+  sel.addEventListener("change", () => { updateDensity(); markDirty(); });
+  resetLimits(true);
+  updateDensity();
+  $$("[data-p]").forEach(inp => inp.addEventListener("input", () => { markDirty(); validateParamField(inp); }));
+  $$("input[name=cut_mode]").forEach(r => r.addEventListener("change", () => markDirty()));
+}
+function updateDensity() { $("#densityLbl").textContent = `比重：${DENSITY[$("#p_mat").value]}`; }
+function validateParamField(inp) {
+  if (inp.hasAttribute("data-int")) inp.classList.toggle("bad", !/^\s*[+-]?\d+\s*$/.test(inp.value));
+}
+function resetLimits(silent) {
+  const d = {bw_min: BW_MIN, bw_max: BW_MAX, bl_min: BL_MIN, bl_max: BL_MAX, w_min: W_MIN, w_max: W_MAX};
+  Object.entries(d).forEach(([k, v]) => { const el = $(`#p_${k}`); el.value = String(v); validateParamField(el); });
+  if (!silent) { setStatus("採購限制已恢復預設值。"); markDirty(); }
+}
+function readRawParams() {
+  const p = {};
+  PARAM_STR_KEYS.concat(PARAM_INT_KEYS).forEach(k => { p[k] = $(`#p_${k}`).value.trim(); });
+  p.mat_name = $("#p_mat").value;
+  p.cut_mode = $("input[name=cut_mode]:checked").value;
+  return p;
+}
+function getParams(silent) {
+  try {
+    const raw = readRawParams();
+    const p = {
+      proj_no: raw.proj_no, proj_name: raw.proj_name, proj_date: raw.proj_date,
+      split_code: raw.split_code || "A",
+      mat_name: raw.mat_name, density: DENSITY[raw.mat_name],
+    };
+    PARAM_INT_KEYS.forEach(k => { p[k] = pyInt(raw[k]); });
+    p.cut_mode = raw.cut_mode;
+    if (["new_kerf", "new_trim", "scrap_kerf", "scrap_trim"].some(k => p[k] < 0)) throw new Error("鋸縫與修邊尺寸不可小於 0。");
+    if (Math.min(p.bw_min, p.bw_max, p.bl_min, p.bl_max) <= 0) throw new Error("板寬與板長限制必須大於 0。");
+    if (p.w_min < 0 || p.w_max <= 0) throw new Error("重量限制必須為正數（最低重量可為 0）。");
+    if (p.bw_min > p.bw_max || p.bl_min > p.bl_max) throw new Error("板材最小尺寸不可大於最大尺寸。");
+    if (p.w_min > p.w_max) throw new Error("最低重量不可大於最高重量。");
+    return p;
+  } catch (e) {
+    if (!silent) { showError("參數錯誤", `數值欄位必須為整數：${e.message}`); switchTab("param"); }
+    return null;
+  }
+}
+function setParams(p) {
+  PARAM_STR_KEYS.concat(PARAM_INT_KEYS).forEach(k => {
+    if (p[k] !== undefined && p[k] !== null) { const el = $(`#p_${k}`); el.value = String(p[k]); validateParamField(el); }
+  });
+  if (p.mat_name && DENSITY[p.mat_name] !== undefined) $("#p_mat").value = p.mat_name;
+  if (p.cut_mode === "single" || p.cut_mode === "multi") $(`input[name=cut_mode][value=${p.cut_mode}]`).checked = true;
+  updateDensity();
+}
+
+/* ── 分頁 ── */
+function switchTab(name) {
+  $$(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+  ["param", "bh", "sc"].forEach(n => { $(`#tab-${n}`).hidden = n !== name; });
+}
+
+/* ── 可編輯表格（BH / 餘料） ── */
+function bhCellBad(r, f) {
+  if (f === "spec") return r.spec.trim() !== "" && !parseBH(r.spec);
+  if (f === "length" || f === "qty") { const t = r[f].trim(); return t !== "" && !(/^[+-]?\d+$/.test(t) && +t > 0); }
+  return false;
+}
+function scCellBad(r, f) {
+  if (f === "mat") return false;
+  const t = r[f].trim(); return t !== "" && !(/^[+-]?\d+$/.test(t) && +t > 0);
+}
+function renderBh() {
+  $("#bhBody").innerHTML = S.bh.map((r, i) => `<tr data-uid="${r.uid}" class="${r.sel ? "sel" : ""}">
+    <td class="chk"><input type="checkbox" data-sel ${r.sel ? "checked" : ""} aria-label="選取第 ${i + 1} 列"></td><td class="no">${i + 1}</td>
+    ${BH_FIELDS.map(f => `<td><input class="cell${f === "spec" ? " wide" : ""}${bhCellBad(r, f) ? " bad" : ""}" data-f="${f}" value="${esc(r[f])}" ${f === "length" || f === "qty" ? 'inputmode="numeric"' : ""} aria-label="${f}"></td>`).join("")}
+  </tr>`).join("");
+  $("#bhEmpty").hidden = S.bh.length > 0;
+  $("#bhCount").textContent = S.bh.length ? `共 ${S.bh.length} 列　已選 ${S.bh.filter(r => r.sel).length} 列` : "";
+  $("#bhBadge").textContent = S.bh.length ? `(${S.bh.length})` : "";
+  $('[data-selall="bh"]').checked = S.bh.length > 0 && S.bh.every(r => r.sel);
+}
+function renderSc() {
+  $("#scBody").innerHTML = S.sc.map((r, i) => `<tr data-uid="${r.uid}" class="${r.sel ? "sel" : ""}">
+    <td class="chk"><input type="checkbox" data-sel ${r.sel ? "checked" : ""} aria-label="選取第 ${i + 1} 列"></td><td class="ro">${esc(r.no)}</td>
+    ${SC_FIELDS.map(f => `<td><input class="cell${scCellBad(r, f) ? " bad" : ""}" data-f="${f}" value="${esc(r[f])}" ${f !== "mat" ? 'inputmode="numeric"' : ""} aria-label="${f}"></td>`).join("")}
+  </tr>`).join("");
+  $("#scEmpty").hidden = S.sc.length > 0;
+  $("#scCount").textContent = S.sc.length ? `共 ${S.sc.length} 列　已選 ${S.sc.filter(r => r.sel).length} 列` : "";
+  $("#scBadge").textContent = S.sc.length ? `(${S.sc.length})` : "";
+  $('[data-selall="sc"]').checked = S.sc.length > 0 && S.sc.every(r => r.sel);
+}
+function wireEditGrid(tbodySel, listKey, fields, badFn, render, newRow) {
+  const tb = $(tbodySel);
+  const rowOf = el => { const tr = el.closest("tr"); return tr && S[listKey].find(r => r.uid === +tr.dataset.uid); };
+  tb.addEventListener("input", e => {
+    const inp = e.target; if (!inp.classList.contains("cell")) return;
+    const r = rowOf(inp); if (!r) return;
+    r[inp.dataset.f] = inp.value;
+    inp.classList.toggle("bad", badFn(r, inp.dataset.f));
+    markDirty();
+  });
+  tb.addEventListener("change", e => {
+    if (!e.target.hasAttribute("data-sel")) return;
+    const r = rowOf(e.target); if (r) { r.sel = e.target.checked; render(); }
+  });
+  tb.addEventListener("keydown", e => {
+    const inp = e.target; if (!inp.classList.contains("cell")) return;
+    if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const tr = inp.closest("tr"), td = inp.closest("td");
+      const target = (e.key === "ArrowUp") ? tr.previousElementSibling : tr.nextElementSibling;
+      if (target) { e.preventDefault(); const nx = target.children[td.cellIndex]?.querySelector("input.cell"); if (nx) { nx.focus(); nx.select(); } }
+    }
+  });
+  // 從 Excel 複製多列多欄貼上
+  tb.addEventListener("paste", e => {
+    const inp = e.target; if (!inp.classList.contains("cell")) return;
+    const text = (e.clipboardData || window.clipboardData).getData("text");
+    if (!/[\t\n]/.test(text.replace(/\r?\n$/, ""))) return;
+    e.preventDefault();
+    const lines = text.replace(/\r/g, "").replace(/\n$/, "").split("\n").map(l => l.split("\t"));
+    const list = S[listKey];
+    let ri = list.indexOf(rowOf(inp));
+    const fi = fields.indexOf(inp.dataset.f);
+    lines.forEach(cells => {
+      if (ri >= list.length) list.push(newRow());
+      cells.forEach((v, k) => { const f = fields[fi + k]; if (f) list[ri][f] = v.trim(); });
+      ri++;
+    });
+    if (listKey === "sc") numberNewScraps();
+    render(); markDirty();
+    setStatus(`已貼上 ${lines.length} 列資料。`);
+  });
+}
+function numberNewScraps() {
+  // 新增時才給「既NN」編號（與 Python 版相同：編號 = 目前列數）
+  S.sc.forEach((r, i) => { if (!r.no) r.no = `既${pad2(i + 1)}`; });
+}
+
+async function bhAdd() {
+  const d = await formDialog("新增 BH 構件", [
+    {key: "comp", label: "構件編號：", value: "C1"},
+    {key: "part", label: "零件編號：", value: "P1"},
+    {key: "spec", label: "斷面規格：", value: "BH700×350×14×28"},
+    {key: "length", label: "長度(mm)：", value: "9700", numeric: true},
+    {key: "qty", label: "數量(支)：", value: "4", numeric: true},
+    {key: "mat", label: "材質：", value: "A36"},
+  ]);
+  if (!d) return;
+  try { d.length = pyInt(d.length); d.qty = pyInt(d.qty); }
+  catch (e) { showError("錯誤", "長度與數量必須為整數。"); return; }
+  S.bh.push(makeBhRow(d)); renderBh(); markDirty(); switchTab("bh");
+}
+async function scAdd() {
+  const d = await formDialog("新增現有餘料", [
+    {key: "thick", label: "厚度(mm)：", value: "18", numeric: true},
+    {key: "width", label: "寬度(mm)：", value: "620", numeric: true},
+    {key: "length", label: "長度(mm)：", value: "9600", numeric: true},
+    {key: "qty", label: "數量(片)：", value: "1", numeric: true},
+    {key: "mat", label: "材質：", value: "A36"},
+  ]);
+  if (!d) return;
+  try { ["thick", "width", "length", "qty"].forEach(k => { d[k] = pyInt(d[k]); }); }
+  catch (e) { showError("錯誤", "數值欄位必須為整數。"); return; }
+  d.no = `既${pad2(S.sc.length + 1)}`;
+  S.sc.push(makeScRow(d)); renderSc(); markDirty(); switchTab("sc");
+}
+function delSelected(key, render) {
+  const n = S[key].filter(r => r.sel).length;
+  if (!n) { showInfo("提示", "請先勾選要刪除的列。"); return; }
+  S[key] = S[key].filter(r => !r.sel); render(); markDirty();
+  setStatus(`已刪除 ${n} 列。`);
+}
+
+/* ── 讀取表格資料（對應 _get_bh_rows / _get_scraps） ── */
+function getBhRows(silent) {
+  const rows = [];
+  for (let i = 0; i < S.bh.length; i++) {
+    const v = S.bh[i];
+    try {
+      const row = {comp: v.comp, part: v.part, spec: v.spec, length: pyInt(v.length), qty: pyInt(v.qty), mat: v.mat};
+      if (row.length <= 0 || row.qty <= 0) throw new Error("長度與數量必須大於 0。");
+      rows.push(row);
+    } catch (e) {
+      if (!silent) { showError("資料錯誤", `BH配料表第 ${i + 1} 列資料有誤：${e.message}\n${BH_FIELDS.map(f => v[f]).join("、")}`); switchTab("bh"); }
+      return null;
+    }
+  }
+  return rows;
+}
+function getScraps(silent) {
+  const scraps = [];
+  for (let i = 0; i < S.sc.length; i++) {
+    const v = S.sc[i];
+    let thick, width, length, qty;
+    try {
+      [thick, width, length, qty] = [v.thick, v.width, v.length, v.qty].map(pyInt);
+      if (Math.min(thick, width, length, qty) <= 0) throw new Error("厚度、寬度、長度與數量都必須大於 0。");
+    } catch (e) {
+      if (!silent) { showError("餘料資料錯誤", `現有餘料第 ${i + 1} 列：${e.message}\n${[v.no].concat(SC_FIELDS.map(f => v[f])).join("、")}`); switchTab("sc"); }
+      return null;
+    }
+    // 拆成單片並給每片唯一編號，才能正確表示同一批餘料只用掉部分數量
+    for (let k = 1; k <= qty; k++) {
+      scraps.push({id: `${v.no}-${rowTag(v)}-${pad2(k)}`, thick, width, length, qty: 1, mat: v.mat});
+    }
+  }
+  return scraps;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   進度檔（與 Python 版 JSON 格式相容）
+   ═════════════════════════════════════════════════════════════════ */
+const numOrRaw = s => (/^\s*[+-]?\d+\s*$/.test(s) ? parseInt(s, 10) : s);
+function collectSession() {
+  const p = getParams(true);
+  let params;
+  if (p) params = p;
+  else { params = readRawParams(); params.density = DENSITY[params.mat_name]; }
+  return {
+    version: "1.0", saved_at: stampFull(), params,
+    bh_rows: S.bh.map(r => ({comp: r.comp, part: r.part, spec: r.spec, length: numOrRaw(r.length), qty: numOrRaw(r.qty), mat: r.mat})),
+    scraps: S.sc.map(r => ({id: r.no, thick: numOrRaw(r.thick), width: numOrRaw(r.width), length: numOrRaw(r.length), qty: numOrRaw(r.qty), mat: r.mat})),
+  };
+}
+function restoreSession(data) {
+  setParams(data.params || {});
+  S.bh = (data.bh_rows || []).map(r => makeBhRow(r));
+  S.sc = (data.scraps || []).map(sc => makeScRow({no: sc.id ?? "", thick: sc.thick, width: sc.width, length: sc.length, qty: sc.qty, mat: sc.mat}));
+  renderBh(); renderSc();
+  setStatus(`已還原進度（${data.saved_at || ""}）　BH ${S.bh.length} 筆　餘料 ${S.sc.length} 筆`);
+}
+async function saveSession(asNew) {
+  const data = collectSession();
+  const text = JSON.stringify(data, null, 2);
+  const p = data.params;
+  const suggested = p.proj_no ? `BH配料_${p.proj_no}_${p.proj_name}.json` : "BH配料.json";
+  if (window.showSaveFilePicker) {
+    try {
+      let handle = (!asNew && S.fileHandle) ? S.fileHandle : null;
+      if (!handle) handle = await window.showSaveFilePicker({suggestedName: suggested, types: [{description: "BH配料進度檔", accept: {"application/json": [".json"]}}]});
+      const w = await handle.createWritable(); await w.write(text); await w.close();
+      S.fileHandle = handle; S.fileName = handle.name; markDirty(false);
+      setStatus(`✅ 已儲存：${handle.name}`);
+      return true;
+    } catch (e) {
+      if (e.name === "AbortError") return false;
+      // 其他錯誤（例如權限）→ 改用下載
+    }
+  }
+  const name = (!asNew && S.fileName) ? S.fileName : suggested;
+  download(text, name, "application/json;charset=utf-8");
+  S.fileName = name; markDirty(false);
+  setStatus(`✅ 已下載進度檔：${name}`);
+  return true;
+}
+async function openSession() {
+  try {
+    let file, handle = null;
+    if (window.showOpenFilePicker) {
+      try {
+        [handle] = await window.showOpenFilePicker({types: [{description: "BH配料進度檔", accept: {"application/json": [".json"]}}]});
+        file = await handle.getFile();
+      } catch (e) { if (e.name === "AbortError") return; handle = null; file = await pickFile(".json,application/json"); }
+    } else file = await pickFile(".json,application/json");
+    if (!file) return;
+    const data = JSON.parse(decodeBytes(await file.arrayBuffer()));
+    S.fileHandle = handle; S.fileName = file.name;
+    restoreSession(data); markDirty(false);
+  } catch (e) { showError("開啟失敗", e.message); }
+}
+const AUTOSAVE_KEY = "bh_peilian_autosave";
+function autosave() {
+  try {
+    if (!S.bh.length || !S.dirty) return;
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(collectSession()));
+  } catch (e) { /* 無法使用瀏覽器儲存空間時略過 */ }
+}
+async function askRestore() {
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem(AUTOSAVE_KEY) || "null"); localStorage.removeItem(AUTOSAVE_KEY); } catch (e) { data = null; }
+  if (!data) return;
+  const ans = await askYesNo("發現未完成的進度",
+    `上次關閉頁面時有未儲存的資料：\n\n  時間：${data.saved_at || "不明時間"}\n  BH構件：${(data.bh_rows || []).length} 筆\n\n是否還原？`);
+  if (ans) { restoreSession(data); markDirty(true); }
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   執行配料計算
+   ═════════════════════════════════════════════════════════════════ */
+function setCalcBusy(busy) {
+  const b = $("#calcBtn");
+  b.disabled = busy; b.textContent = busy ? "⏳ 計算中..." : "▶ 執行配料計算";
+  $("#cancelBtn").disabled = !busy;
+  $("#progWrap").hidden = !busy;
+  if (!busy) $("#progBar").style.width = "0";
+}
+function onProgress(done, total) {
+  setStatus(`⏳ 配料最佳化：${done}/${total} 次（${Math.floor(done * 100 / total)}%）`);
+  $("#progBar").style.width = (done * 100 / total) + "%";
+}
+let _workerURL = null;
+function makeWorker() {
+  if (!_workerURL) {
+    const src = $("#core-src").textContent + `
+self.postMessage({type: "ready"});
+self.onmessage = function (e) {
+  try {
+    var d = e.data;
+    var res = planPurchase(d.parts, d.params, d.scraps, 600, function (a, b) { self.postMessage({type: "progress", done: a, total: b}); });
+    self.postMessage({type: "done", result: res});
+  } catch (err) { self.postMessage({type: "error", message: String(err && err.message || err)}); }
+};`;
+    _workerURL = URL.createObjectURL(new Blob([src], {type: "text/javascript"}));
+  }
+  return new Worker(_workerURL);
+}
+function runPlan(parts, params, scraps) {
+  // 背景 Worker 計算；瀏覽器不支援時退回主執行緒分段計算
+  return new Promise((resolve, reject) => {
+    let worker = null;
+    try { worker = makeWorker(); } catch (e) { worker = null; }
+    if (worker) {
+      let alive = false, switched = false;
+      const toFallback = () => { if (switched) return; switched = true; clearTimeout(watchdog); worker.terminate(); fallback(); };
+      // 部分環境（例如直接開啟本機檔案）Worker 可能無聲無息地啟動失敗 → 3 秒內沒回應就改用主執行緒
+      const watchdog = setTimeout(() => { if (!alive) toFallback(); }, 3000);
+      S.calc = {mode: "worker", cancel: () => { clearTimeout(watchdog); worker.terminate(); resolve(null); }};
+      worker.onmessage = e => {
+        const m = e.data;
+        alive = true;
+        if (m.type === "progress") onProgress(m.done, m.total);
+        else if (m.type === "done") { clearTimeout(watchdog); worker.terminate(); S.lastCalcMode = "worker"; resolve(m.result); }
+        else if (m.type === "error") { clearTimeout(watchdog); worker.terminate(); reject(new Error(m.message)); }
+      };
+      worker.onerror = e => { e.preventDefault(); if (!alive) toFallback(); else { clearTimeout(watchdog); worker.terminate(); reject(new Error(e.message || "背景計算發生錯誤")); } };
+      worker.postMessage({parts, params, scraps});
+      return;
+    }
+    fallback();
+    function fallback() {
+      S.lastCalcMode = "main";
+      let cancelled = false;
+      S.calc = {cancel: () => { cancelled = true; }};
+      const groups = buildGroups(parts), N = 600;
+      let best = null, bestScore = null, i = 0;
+      const step = () => {
+        if (cancelled) { resolve(null); return; }
+        try {
+          const end = Math.min(N, i + 8);
+          for (; i < end; i++) {
+            const r = planOnce(groups, params, scraps, i), s = scoreOf(r);
+            if (scoreBetter(s, bestScore)) { bestScore = s; best = r; }
+            if (i % 5 === 0 || i + 1 === N) onProgress(i + 1, N);
+          }
+        } catch (err) { reject(err); return; }
+        if (i < N) setTimeout(step, 0); else resolve(best);
+      };
+      setTimeout(step, 0);
+    }
+  });
+}
+
+async function runCalc() {
+  if (S.calc) return;
+  const params = getParams(); if (!params) return;
+  const bh_rows = getBhRows(); if (bh_rows === null) return;
+  if (!bh_rows.length) { showWarn("警告", "請先在「BH配料表」標籤頁輸入構件資料。"); switchTab("bh"); return; }
+  const scraps = getScraps(); if (scraps === null) return;
+
+  const decomposed = [];
+  for (const row of bh_rows) {
+    const d = decomposeBH(row, params.density);
+    if (!d) { showError("格式錯誤", `無法解析 BH 斷面規格：${row.spec}\n請確認格式為 BH高×寬×腹厚×翼厚`); switchTab("bh"); return; }
+    decomposed.push(d);
+  }
+  // 拆鈑流水號：相同 (厚, 寬, 長) 共用同一號，按出現順序編排
+  const split_code = params.split_code || "A";
+  const buildSerials = objs => {
+    const map = new Map(); let n = 1;
+    objs.forEach(o => { const k = `${o.thick},${o.width},${o.length}`; if (!map.has(k)) map.set(k, n++); });
+    objs.forEach(o => { o.serial = `${split_code}-${map.get(`${o.thick},${o.width},${o.length}`)}`; });
+  };
+  buildSerials(decomposed.map(d => d.flange));
+  buildSerials(decomposed.map(d => d.web));
+  const parts_list = [];
+  decomposed.forEach(d => { parts_list.push(d.flange); parts_list.push(d.web); });
+
+  const too_large = parts_list.find(p => p.width + 2 * params.new_trim > params.bw_max || p.length + 2 * params.new_trim > params.bl_max);
+  if (too_large) {
+    showError("尺寸超出限制", `零件 ${too_large.name} 尺寸為 ${too_large.width}×${too_large.length} mm，加上修邊後超出設定的板材最大尺寸 ${params.bw_max}×${params.bl_max} mm。`);
+    return;
+  }
+
+  setStatus("⏳ 配料最佳化：準備中…");
+  setCalcBusy(true);
+  S.result = null;
+  let res;
+  try { res = await runPlan(parts_list, params, scraps); }
+  catch (e) { S.calc = null; setCalcBusy(false); showError("計算失敗", e.message); setStatus("計算失敗，請檢查輸入資料。"); return; }
+  S.calc = null; setCalcBusy(false);
+  if (!res) { setStatus("配料計算已取消。"); return; }
+
+  S.result = {
+    params, bh_rows, decomposed,
+    purchase_list: res.purchase_list, cut_details: res.cut_details, new_scraps: res.new_scraps,
+    existing_scraps: scraps, used_scrap_ids: new Set(res.used_scrap_ids),
+  };
+  S.peRows = null; S.peResult = null;
+  const total_buy = sum(res.purchase_list, p => p.total_wt);
+  setStatus(`計算完成｜採購 ${res.purchase_list.length} 片，${fmtInt(total_buy)} kg｜切割 ${res.cut_details.length} 次｜餘料 ${res.new_scraps.length} 件`);
+  const ans = await dialog({
+    title: "配料完成", kind: "ok",
+    text: `✅ 計算完成！\n\n  BH 構件：${bh_rows.length} 項\n  採購新板：${res.purchase_list.length} 片　合計 ${fmtInt(total_buy)} kg\n  切割片次：${res.cut_details.length} 次\n  產生餘料：${res.new_scraps.length} 件\n  使用既有餘料：${res.used_scrap_ids.length} 件\n\n可點擊「🔍 配料結果」預覽，或「💾 匯出Excel」儲存報表。`,
+    buttons: [{label: "關閉", value: false}, {label: "💾 匯出Excel", value: "xlsx", cls: "btn-green"}, {label: "🔍 預覽結果", value: "preview", cls: "btn-primary"}]
+  });
+  if (ans === "preview") openPreview(S.result);
+  if (ans === "xlsx") exportXlsx(S.result, `BH_配料報表_${stamp()}.xlsx`);
+}
+function cancelCalc() {
+  if (S.calc) { $("#cancelBtn").disabled = true; setStatus("⏳ 已要求取消，正在結束目前的配料步驟…"); S.calc.cancel(); }
+}
+async function clearAll() {
+  if (!await askYesNo("確認", "確定要清除所有資料？")) return;
+  S.bh = []; S.sc = []; S.result = null; S.peRows = null; S.peResult = null;
+  renderBh(); renderSc(); markDirty();
+  setStatus("已清除全部資料。");
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   匯入 CSV
+   ═════════════════════════════════════════════════════════════════ */
+async function importBhCsv() {
+  const file = await pickFile(".csv,text/csv"); if (!file) return;
+  try {
+    const rows_raw = parseCSV(decodeBytes(await file.arrayBuffer()));
+    // 從標題區讀取案號、案名、日期
+    rows_raw.slice(0, 8).forEach(row => {
+      const s = row.join(",");
+      let m = /案號[：:]\s*([^\s,]+)/.exec(s); if (m && m[1].trim()) $("#p_proj_no").value = m[1].trim();
+      m = /案名[：:]\s*([^,日期]+)/.exec(s);    if (m && m[1].trim()) $("#p_proj_name").value = m[1].trim();
+      m = /日期[：:]\s*([^\s,]+)/.exec(s);       if (m && m[1].trim()) $("#p_proj_date").value = m[1].trim();
+    });
+    const header_idx = rows_raw.findIndex(row => row.some(c => ["構件編號", "零件編號"].includes(c.trim())));
+    if (header_idx < 0) { showError("錯誤", "找不到標頭列（構件編號、零件編號）\n請確認 CSV 格式正確。"); return; }
+    const headers = rows_raw[header_idx].map(c => c.trim());
+    const get_col = (row, ...names) => {
+      for (const n of names) { const i = headers.indexOf(n); if (i >= 0 && i < row.length) return row[i].trim(); }
+      return "";
+    };
+    const parsed = [], errors = [];
+    rows_raw.slice(header_idx + 1).forEach((row, k) => {
+      const line = header_idx + 2 + k;
+      if (!row.some(c => c.trim())) return;
+      const comp = get_col(row, "構件編號");
+      if (!comp) { errors.push(`第 ${line} 列：缺少構件編號。`); return; }
+      const part = get_col(row, "零件編號"), spec = get_col(row, "斷面規格");
+      const length = get_col(row, "長度", "長度(mm)"), qty = get_col(row, "數量");
+      const mat = get_col(row, "材質") || "A36";
+      if (!spec || !length) { errors.push(`第 ${line} 列：缺少斷面規格或長度。`); return; }
+      const lv = Math.trunc(Number(length)), qv = qty ? Math.trunc(Number(qty)) : 1;
+      if (!isFinite(lv) || !isFinite(qv) || length.trim() === "" ) { errors.push(`第 ${line} 列：長度或數量格式錯誤。`); return; }
+      if (lv <= 0 || qv <= 0) { errors.push(`第 ${line} 列：長度與數量必須大於 0。`); return; }
+      if (!parseBH(spec)) { errors.push(`第 ${line} 列：斷面規格格式錯誤：${spec}`); return; }
+      parsed.push({comp, part, spec, length: lv, qty: qv, mat});
+    });
+    if (!parsed.length) {
+      showError("錯誤", `沒有有效資料可匯入（錯誤 ${errors.length} 筆）。`).then(() => showImportErrors("BH CSV 匯入錯誤", errors));
+      return;
+    }
+    S.bh = parsed.map(r => makeBhRow(r)); renderBh(); markDirty(); switchTab("bh");
+    setStatus(`已匯入 ${parsed.length} 筆 BH 構件資料。`);
+    let msg = `成功匯入 ${parsed.length} 筆構件。`;
+    if (errors.length) msg += `\n另有 ${errors.length} 列未匯入，請開啟錯誤明細查看。`;
+    await showOk("匯入成功", msg);
+    if (errors.length) showImportErrors("BH CSV 匯入錯誤", errors);
+  } catch (e) { showError("匯入失敗", e.message); }
+}
+async function importScCsv() {
+  const file = await pickFile(".csv,text/csv"); if (!file) return;
+  let rows;
+  try { rows = parseCSV(decodeBytes(await file.arrayBuffer())); } catch (e) { rows = null; }
+  if (!rows || rows.length < 2) { showError("錯誤", "無法讀取 CSV，請確認檔案格式與編碼。"); return; }
+  const header = rows[0];
+  const dicts = rows.slice(1).filter(r => !(r.length === 1 && r[0] === "")).map(r => {
+    const o = {}; header.forEach((h, i) => { o[h] = r[i]; }); return o;
+  });
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const pick = (o, a, b, dflt) => has(o, a) ? o[a] : (has(o, b) ? o[b] : dflt);
+  let imported = 0; const errors = [];
+  dicts.forEach((row, i) => {
+    try {
+      const thick = pyInt(pick(row, "厚度(mm)", "thick", "")), width = pyInt(pick(row, "寬度(mm)", "width", ""));
+      const length = pyInt(pick(row, "長度(mm)", "length", "")), qty = pyInt(pick(row, "數量(片)", "qty", 1));
+      const mat = String(pick(row, "材質", "mat", "黑鐵板（碳鋼）") ?? "").trim();
+      if (Math.min(thick, width, length, qty) <= 0) throw new Error("厚度、寬度、長度與數量都必須大於 0");
+      S.sc.push(makeScRow({no: `既${pad2(S.sc.length + 1)}`, thick, width, length, qty, mat}));
+      imported++;
+    } catch (e) { errors.push(`第${i + 1}列：${e.message}`); }
+  });
+  renderSc(); markDirty(); switchTab("sc");
+  let msg = `成功匯入 ${imported} 筆餘料。`;
+  if (errors.length) msg += `\n另有 ${errors.length} 列未匯入，請開啟錯誤明細查看。`;
+  await showOk("匯入完成", msg);
+  if (errors.length) showImportErrors("餘料 CSV 匯入錯誤", errors);
+}
+function downloadBlankBh() {
+  download(b64ToBytes(BLANK_BH_CSV_B64), "BH配料表.csv", "text/csv");
+  setStatus("已下載空白配料表（BH配料表.csv）。");
+}
+function downloadBlankSc() {
+  const text = "﻿" + csvLine(["厚度(mm)", "寬度(mm)", "長度(mm)", "數量(片)", "材質"]) +
+    csvLine([16, 744, 9000, 1, "SN490B"]) + csvLine([28, 350, 6000, 2, "黑鐵板（碳鋼）"]);
+  download(text, "現有餘料表.csv", "text/csv;charset=utf-8");
+  showInfo("下載完成", "空白餘料表已下載（現有餘料表.csv）。\n\n請填寫後再用「📂 餘料CSV」按鈕載入。");
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   結果資料共用整理
+   ═════════════════════════════════════════════════════════════════ */
+function needResult() {
+  if (!S.result) { showWarn("提示", "請先執行配料計算。"); return false; }
+  return true;
+}
+function assignScrapNumbers(r) { r.new_scraps.forEach((sc, i) => { sc._no = `餘${pad2(i + 1)}`; }); }
+function serialMap(r) {
+  const m = {};
+  r.decomposed.forEach(d => {
+    const fl = d.flange.serial || "", wb = d.web.serial || "";
+    m[d.flange.name] = fl ? `${fl}F` : "";
+    m[d.web.name] = wb ? `${wb}W` : "";
+  });
+  return m;
+}
+function mergePurchase(list) {
+  const map = new Map();
+  list.forEach(p => {
+    const k = JSON.stringify([p.spec, p.mat, p.unit_wt]);
+    if (!map.has(k)) map.set(k, {spec: p.spec, mat: p.mat, unit_wt: p.unit_wt, qty: 0, total_wt: 0});
+    const v = map.get(k); v.qty += p.qty; v.total_wt += p.total_wt;
+  });
+  return Array.from(map.values());
+}
+const unusedScraps = r => r.existing_scraps.filter(s => !r.used_scrap_ids.has(s.id));
+const usedScraps = r => r.existing_scraps.filter(s => r.used_scrap_ids.has(s.id));
+const plSpec = o => `PL${o.thick}×${o.width}×${o.length}`;
+const typeLabel = (t, long) => t === "F" ? (long ? "F=翼鈑" : "F=翼") : (long ? "W=腹鈑" : "W=腹");
+function paramLine(p) {
+  return `工程：${p.proj_no}　${p.proj_name}　材質：${p.mat_name}　比重：${p.density}　新板每刀：${p.new_kerf}mm 頭尾：${p.new_trim}mm　餘料每刀：${p.scrap_kerf}mm 頭尾：${p.scrap_trim}mm`;
+}
+function thickGroups(r) {
+  const map = new Map();
+  r.decomposed.forEach(d => {
+    [[d.flange, "F"], [d.web, "W"]].forEach(([part, suf]) => {
+      const sn = part.serial || "", sn_wf = sn ? `${sn}${suf}` : "", spec = plSpec(part);
+      const k = JSON.stringify([sn_wf, spec, part.mat, part.unit_wt]);
+      if (!map.has(k)) map.set(k, {sn_wf, spec, mat: part.mat, unit_wt: part.unit_wt, qty: 0, total_wt: 0});
+      const v = map.get(k); v.qty += part.total; v.total_wt += part.total_wt;
+    });
+  });
+  return Array.from(map.values());
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   配料結果預覽（對應 PreviewWindow）
+   ═════════════════════════════════════════════════════════════════ */
+function gridHTML(cols, rows) {
+  return `<div class="grid-wrap"><table class="grid"><thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${
+    rows.map(r => `<tr class="${r.cls || ""}" ${r.attrs || ""}>${r.cells.map((v, i) =>
+      `<td class="${(r.left || []).includes(i) ? "l" : ""}">${v && v.html !== undefined ? v.html : esc(v)}</td>`).join("")}</tr>`).join("")
+  }</tbody></table></div>`;
+}
+function openPreview(r, titleSuffix) {
+  assignScrapNumbers(r);   // 統一賦予餘NO，排列圖需要讀取
+  const zebra = i => i % 2 === 0 ? "odd" : "even";
+  const tabs = {};
+
+  tabs["配料清單"] = () => gridHTML(["構件編號", "零件編號", "斷面規格", "長度(mm)", "數量", "材質"],
+    r.bh_rows.map((row, i) => ({cls: zebra(i), cells: [row.comp, row.part, row.spec, row.length, row.qty, row.mat]})));
+
+  tabs["BH拆板明細"] = () => {
+    const rows = [];
+    r.decomposed.forEach(d => {
+      const cw = pyRound(d.flange.unit_wt * 2 + d.web.unit_wt, 1), ct = pyRound(cw * d.qty, 1);
+      const fl = d.flange, wb = d.web, fs = fl.serial || "", ws = wb.serial || "";
+      rows.push({cls: "comp", cells: [d.comp, "", "", "", "", d.spec, d.length, d.qty, d.mat, fmtF(cw), fmtF(ct)]});
+      rows.push({cls: "odd", cells: [d.comp, d.part || "", fl.name, fs, fs ? fs + "F" : "", plSpec(fl), fl.length, fl.total, fl.mat, fmtF(fl.unit_wt), fmtF(fl.total_wt)]});
+      rows.push({cls: "even", cells: [d.comp, d.part || "", wb.name, ws, ws ? ws + "W" : "", plSpec(wb), wb.length, wb.total, wb.mat, fmtF(wb.unit_wt), fmtF(wb.total_wt)]});
+    });
+    return gridHTML(["構件編號", "零件編號", "拆板零件", "流水號", "流水號(W/F)", "斷面規格", "長度(mm)", "數量", "材質", "單重(kg)", "總重(kg)"], rows);
+  };
+
+  tabs["BH合板清單"] = () => {
+    const rows = [];
+    r.decomposed.forEach(d => {
+      const fs = d.flange.serial || "", ws = d.web.serial || "";
+      rows.push({cls: "odd", cells: [d.comp, fs ? fs + "F" : "", plSpec(d.flange), d.flange.length, d.flange.total]});
+      rows.push({cls: "even", cells: [d.comp, ws ? ws + "W" : "", plSpec(d.web), d.web.length, d.web.total]});
+    });
+    return gridHTML(["構件編號", "流水號(W/F)", "斷面規格", "長度(mm)", "數量"], rows);
+  };
+
+  tabs["採購清單"] = () => {
+    const merged = mergePurchase(r.purchase_list);
+    const rows = merged.map((v, i) => ({cls: zebra(i), cells: [i + 1, v.spec, v.qty, v.mat, v.unit_wt, Math.round(v.total_wt)]}));
+    rows.push({cls: "tot", cells: ["", `採購合計：共 ${sum(merged, v => v.qty)} 片`, "", "", "總重(kg)：", fmtInt(sum(merged, v => v.total_wt))]});
+    return gridHTML(["NO", "採購規格(mm)", "數量", "材質", "單片重(kg)", "總重(kg)"], rows);
+  };
+
+  tabs["切割明細"] = () => {
+    const hasLayouts = r.cut_details.some(ct => ct.layout);
+    return `<div class="toolbar"><span class="tip">💡 點兩下「多段切割」片次（或按 📐）可查看實際排列圖</span><span class="grow"></span>
+      ${hasLayouts ? `<button class="btn btn-teal btn-sm" data-a="layoutList">📐 多段排列圖清單（批次下載 / 合併PDF）</button>` : ""}</div>` +
+      gridHTML(["", "片次", "板別", "採購規格(mm)", "材質", "板重(kg)", "構件（裁切尺寸）", "數量", "單重(kg)", "餘料"],
+        r.cut_details.map((ct, i) => ({
+          cls: (ct.is_scrap ? "scrap" : zebra(i)) + " clickable", attrs: `data-ct="${i}"`, left: [6, 9],
+          cells: [ct.layout ? {html: `<button class="btn btn-teal btn-sm" data-ct-open="${i}" title="查看排列圖">📐</button>`} : "",
+                  ct.idx, typeLabel(ct.type), ct.board_spec, ct.mat, ct.board_wt,
+                  `${ct.comp}（${ct.part_spec}）`, ct.qty, fmtF(ct.unit_wt), ct.leftover]
+        })));
+  };
+
+  tabs["餘料清單"] = () => {
+    const rows = r.new_scraps.map((sc, i) => ({cls: zebra(i), cells: [sc._no, sc.src, typeLabel(sc.type), sc.spec, sc.mat, sc.wt, "本次產生"]}));
+    unusedScraps(r).forEach(s => {
+      rows.push({cls: "unused", cells: [`*${s.id}`, "—", "—", plSpec(s), s.mat, Math.round(pyRound(calcWeight(s.width, s.thick, s.length, r.params.density))), "未使用"]});
+    });
+    rows.push({cls: "tot", cells: ["", `餘料合計：共 ${r.new_scraps.length} 件`, "", "", "總重(kg)：", fmtInt(sum(r.new_scraps, s => s.wt)), ""]});
+    return `<div class="toolbar">
+      <button class="btn btn-violet btn-sm" data-a="csvNew">💾 匯出本次產生餘料 CSV</button>
+      <button class="btn btn-rust btn-sm" data-a="csvUnused">💾 匯出未使用現有餘料 CSV</button>
+      <button class="btn btn-green btn-sm" data-a="inv">📒 匯出本次庫存異動</button></div>` +
+      gridHTML(["餘NO", "來源", "板別", "餘料規格(mm)", "材質", "重量(kg)", "狀態"], rows);
+  };
+
+  const names = Object.keys(tabs);
+  const m = openModal({
+    title: "配料結果預覽" + (titleSuffix || ""), size: "xl",
+    bodyHTML: `<div class="ptabs" role="tablist">${names.map((n, i) => `<button class="ptab" role="tab" data-t="${i}" aria-selected="${i === 0}">${n}</button>`).join("")}</div><div class="pbody"></div>`
+  });
+  const pbody = $(".pbody", m.body);
+  const show = i => {
+    $$(".ptab", m.body).forEach(b => b.setAttribute("aria-selected", String(+b.dataset.t === i)));
+    pbody.innerHTML = tabs[names[i]]();
+  };
+  show(0);
+  m.body.addEventListener("click", e => {
+    const t = e.target.closest(".ptab"); if (t) { show(+t.dataset.t); return; }
+    const o = e.target.closest("[data-ct-open]"); if (o) { const ct = r.cut_details[+o.dataset.ctOpen]; openLayoutViewer(ct.idx, ct.layout); return; }
+    const a = e.target.closest("[data-a]")?.dataset.a;
+    if (a === "layoutList") openLayoutList(r);
+    if (a === "csvNew") exportScrapsCsv(r, "new");
+    if (a === "csvUnused") exportScrapsCsv(r, "unused");
+    if (a === "inv") exportInventoryEvents(r);
+  });
+  m.body.addEventListener("dblclick", e => {
+    const tr = e.target.closest("tr[data-ct]"); if (!tr) return;
+    const ct = r.cut_details[+tr.dataset.ct];
+    if (ct.layout) openLayoutViewer(ct.idx, ct.layout);
+    else showInfo("提示", "此片次為單段切割，無多段排列圖");
+  });
+}
+
+function exportScrapsCsv(r, mode) {
+  const fields = ["厚度(mm)", "寬度(mm)", "長度(mm)", "數量(片)", "材質", "重量(kg)", "來源片次"];
+  let rows = [], name;
+  if (mode === "new") {
+    name = `本次產生餘料_${stamp()}.csv`;
+    r.new_scraps.forEach(sc => { const m = specRe.exec(sc.spec); if (m) rows.push([m[1], m[2], m[3], 1, sc.mat, sc.wt, sc.src]); });
+  } else {
+    name = `未使用現有餘料_${stamp()}.csv`;
+    const unused = unusedScraps(r);
+    if (!unused.length) { showInfo("提示", "本次配料所有現有餘料均已使用，無未使用餘料可匯出。"); return; }
+    unused.forEach(s => rows.push([s.thick, s.width, s.length, s.qty ?? 1, s.mat, Math.round(pyRound(calcWeight(s.width, s.thick, s.length, r.params.density))), s.id]));
+  }
+  if (!rows.length) { showInfo("提示", "沒有資料可匯出。"); return; }
+  download("﻿" + csvLine(fields) + rows.map(csvLine).join(""), name, "text/csv;charset=utf-8");
+  showOk("匯出完成", `已匯出 ${rows.length} 筆餘料（${name}）。\n\n此檔案可直接用「📂 餘料CSV」按鈕載入到下次的現有餘料清單中。`);
+}
+async function exportInventoryEvents(r) {
+  const t = stampFull().replace(/\//g, "-"), proj_no = r.params.proj_no || "";
+  const events = [];
+  r.existing_scraps.forEach(sc => {
+    if (r.used_scrap_ids.has(sc.id)) events.push([t, proj_no, "使用既有餘料", sc.id, plSpec(sc), sc.mat, -1, "配料計算"]);
+  });
+  r.new_scraps.forEach(sc => events.push([t, proj_no, "新增切割餘料", sc._no || "", sc.spec, sc.mat, 1, `片次 ${sc.src}`]));
+  if (!events.length) { showInfo("提示", "本次沒有餘料庫存異動可匯出。"); return; }
+  const header = ["時間", "案號", "異動", "餘料編號", "規格(mm)", "材質", "數量變化", "來源"];
+  const body = events.map(csvLine).join("");
+  // 支援的瀏覽器可直接選既有紀錄檔「追加」寫入（與 Python 版相同）
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({suggestedName: "BH_餘料庫存異動紀錄.csv", types: [{description: "CSV 檔案", accept: {"text/csv": [".csv"]}}]});
+      const f = await h.getFile();
+      const existing = f.size ? decodeBytes(await f.arrayBuffer()) : "";
+      const content = "﻿" + (existing.trim() ? existing.replace(/\r?\n?$/, "\r\n") : csvLine(header)) + body;
+      const w = await h.createWritable(); await w.write(content); await w.close();
+      showOk("匯出完成", `已追加 ${events.length} 筆庫存異動：\n${h.name}`);
+      return;
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  download("﻿" + csvLine(header) + body, "BH_餘料庫存異動紀錄.csv", "text/csv;charset=utf-8");
+  showOk("匯出完成", `已匯出 ${events.length} 筆庫存異動（BH_餘料庫存異動紀錄.csv）。`);
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   多段切割排列圖（對應 render_layout / LayoutWindow）
+   ═════════════════════════════════════════════════════════════════ */
+const LV_FONT = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif';
+const LV_FONT_K = 1.3;   // Tk 字級(pt) → 畫布像素
+function canvasDrawer(ctx) {
+  return {
+    rect(x0, y0, x1, y1, o = {}) {
+      if (o.fill) { ctx.fillStyle = o.fill; ctx.fillRect(x0, y0, x1 - x0, y1 - y0); }
+      if (o.outline) {
+        ctx.save(); ctx.strokeStyle = o.outline; ctx.lineWidth = o.width || 1;
+        if (o.dash) ctx.setLineDash(o.dash);
+        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0); ctx.restore();
+      }
+    },
+    line(x0, y0, x1, y1, o = {}) {
+      ctx.save(); ctx.strokeStyle = o.fill || "#000"; ctx.lineWidth = o.width || 1;
+      if (o.dash) ctx.setLineDash(o.dash);
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.restore();
+    },
+    text(x, y, text, o = {}) {
+      ctx.save();
+      ctx.font = `${o.bold ? "bold " : ""}${(o.size || 10) * LV_FONT_K}px ${LV_FONT}`;
+      ctx.fillStyle = o.fill || "#000"; ctx.textBaseline = "middle";
+      ctx.textAlign = o.anchor === "e" ? "right" : o.anchor === "w" ? "left" : "center";
+      ctx.translate(x, y); if (o.angle) ctx.rotate(-o.angle * Math.PI / 180);
+      ctx.fillText(text, 0, 0); ctx.restore();
+    }
+  };
+}
+function drawScrapBlock(dr, x0, y0, x1, y1) {
+  dr.rect(x0, y0, x1, y1, {fill: "#FDE7C8"});
+  const w = x1 - x0, h = y1 - y0;
+  if (w > 6 && h > 6) {
+    const step = 14, diag = w + h;
+    for (let off = 0; off < Math.trunc(diag) + step; off += step) {
+      const xs = x0 + off, ys = y1, xe = x0 + off - h, ye = y0;
+      const cx0 = Math.min(Math.max(xs, x0), x1), cx1 = Math.min(Math.max(xe, x0), x1);
+      if (xe !== xs) {
+        const t0 = (cx0 - xs) / (xe - xs), t1 = (cx1 - xs) / (xe - xs);
+        const cy0 = ys + t0 * (ye - ys), cy1 = ys + t1 * (ye - ys);
+        if ((t0 >= 0 && t0 <= 1) || (t1 >= 0 && t1 <= 1)) dr.line(cx0, cy0, cx1, cy1, {fill: "#F0B868", width: 1});
+      }
+    }
+  }
+  dr.rect(x0, y0, x1, y1, {outline: "#DC6803", width: 2, dash: [4, 2]});
+}
+const LV = {MIN_ROW_H: 80, LABEL_W_BOARD: 40, GAP_1: 30, LABEL_W_ROW: 52, GAP_2: 20, TOP: 50, BOT: 30};
+LV.MARGIN = LV.LABEL_W_BOARD + LV.GAP_1 + LV.LABEL_W_ROW + LV.GAP_2;
+function layoutSize(L, zoom) {
+  const scale = (LV.MIN_ROW_H / L.part_w) * zoom;
+  return {w: Math.ceil(L.board_l * scale) + LV.MARGIN + 60, h: Math.ceil(L.board_w * scale) + LV.TOP + LV.BOT + 20};
+}
+function renderLayout(dr, L, zoom) {
+  const scale = (LV.MIN_ROW_H / L.part_w) * zoom;
+  const x0 = LV.MARGIN, y0 = LV.TOP, x1 = LV.MARGIN + L.board_l * scale, y1 = LV.TOP + L.board_w * scale;
+  dr.rect(x0, y0, x1, y1, {outline: "#333", width: 2, fill: "#FAFAFA"});
+  dr.text((x0 + x1) / 2, y0 - 28, `板長 ${L.board_l} mm`, {size: 14, bold: true});
+  dr.text(LV.LABEL_W_BOARD / 2, (y0 + y1) / 2, `板寬 ${L.board_w} mm`, {size: 13, bold: true, angle: 90});
+  let cur_y = y0;
+  L.rows.forEach((row, ri) => {
+    const row_h = L.part_w * scale;
+    let cur_x = x0 + L.trim * scale;
+    row.parts.forEach((part, pi) => {
+      if (pi > 0) { const kx1 = cur_x + L.kerf * scale; dr.rect(cur_x, cur_y, kx1, cur_y + row_h, {fill: "#FFD966"}); cur_x = kx1; }
+      const pw = part.length * scale;
+      dr.rect(cur_x, cur_y, cur_x + pw, cur_y + row_h, {fill: "#4A90D9", outline: "white", width: 2});
+      if (pw > 90 && row_h > 36) {
+        const fs = Math.max(9, Math.min(14, Math.trunc(row_h / 4)));
+        dr.text(cur_x + pw / 2, cur_y + row_h / 2 - fs * 0.8, part.name, {size: fs, bold: true, fill: "white"});
+        dr.text(cur_x + pw / 2, cur_y + row_h / 2 + fs * 0.8, `${part.length}mm`, {size: Math.max(8, fs - 2), fill: "#EAF3FF"});
+      } else if (pw > 50) {
+        dr.text(cur_x + pw / 2, cur_y + row_h / 2, `${part.length}`, {size: Math.max(8, Math.min(12, Math.trunc(row_h / 3))), fill: "white"});
+      } else if (pw > 26) {
+        dr.text(cur_x + pw / 2, cur_y + row_h / 2, `${part.length}`, {size: Math.max(7, Math.min(9, Math.trunc(row_h / 5))), fill: "white"});
+      }
+      cur_x += pw;
+    });
+    if (cur_x < x1) {
+      drawScrapBlock(dr, cur_x, cur_y, x1, cur_y + row_h);
+      const rem = ((x1 - cur_x) / scale).toFixed(0);
+      const no = row.scrap_ref ? (row.scrap_ref._no || "") : "";
+      const label = no ? `♻ ${no} ${rem}mm` : `♻ 餘料 ${rem}mm`;
+      if ((x1 - cur_x) > 55 && row_h > 28) dr.text((cur_x + x1) / 2, cur_y + row_h / 2, label, {size: Math.max(9, Math.min(13, Math.trunc(row_h / 4))), bold: true, fill: "#B45309"});
+    }
+    const lcx = x0 - LV.GAP_2 - LV.LABEL_W_ROW / 2, mid = cur_y + row_h / 2;
+    dr.text(lcx, mid - 10, `排${ri + 1}`, {size: 13, bold: true});
+    dr.text(lcx, mid + 10, `W${L.part_w}`, {size: 10, fill: "#555"});
+    cur_y += row_h;
+    if (ri < L.rows.length - 1) dr.line(x0, cur_y, x1, cur_y, {fill: "#999", width: 1, dash: [2, 2]});
+  });
+  if (cur_y < y1) {
+    drawScrapBlock(dr, x0, cur_y, x1, y1);
+    const no = L.width_scrap_ref ? (L.width_scrap_ref._no || "") : "";
+    const mmv = ((y1 - cur_y) / scale).toFixed(0);
+    const label = no ? `♻ ${no} 寬度方向餘料 ${mmv}mm` : `♻ 寬度方向餘料 ${mmv}mm`;
+    if ((y1 - cur_y) > 20) dr.text((x0 + x1) / 2, (cur_y + y1) / 2, label, {size: 12, bold: true, fill: "#B45309"});
+  }
+}
+function layoutCanvas(L, zoom, pxRatio) {
+  const {w, h} = layoutSize(L, zoom);
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(w * pxRatio); cv.height = Math.round(h * pxRatio);
+  const ctx = cv.getContext("2d");
+  ctx.scale(pxRatio, pxRatio);
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+  renderLayout(canvasDrawer(ctx), L, zoom);
+  return {cv, w, h};
+}
+const safeIdx = idx => String(idx).replace(/\*/g, "星").replace(/\//g, "_");
+function canvasToBlob(cv) { return new Promise(res => cv.toBlob(res, "image/png")); }
+
+function openLayoutViewer(idx, L) {
+  let zoom = 1.0;
+  const spec = `PL${L.thick}×${L.board_w}×${L.board_l}`;
+  const m = openModal({
+    title: `切割排列圖　片次 ${idx}　${spec}　共 ${L.rows.length} 排　裁切板寬 W${L.part_w}mm`, size: "xl",
+    headHTML: `<button class="btn btn-teal btn-sm" data-a="png">💾 下載圖片</button>`,
+    bodyHTML: `<div class="lv-legend">
+        <span><i class="sw" style="background:#4A90D9"></i>零件</span>
+        <span><i class="sw" style="background:#FDE7C8;outline:2px dashed #DC6803;outline-offset:-2px"></i>♻ 餘料/邊料</span>
+        <span><i class="sw" style="background:#FFD966"></i>切割縫(kerf)</span>
+        <div class="zoom">縮放：<button class="btn btn-ghost btn-sm" data-z="-0.25" aria-label="縮小">－</button><span id="lvZoom">100%</span>
+        <button class="btn btn-ghost btn-sm" data-z="+0.25" aria-label="放大">＋</button><button class="btn btn-ghost btn-sm" data-z="0">100%</button><button class="btn btn-ghost btn-sm" data-z="fit">⤢ 符合寬度</button></div>
+      </div><div class="lv-canvas"></div><div class="hint" style="margin-top:6px">Ctrl + 滑鼠滾輪可縮放</div>`
+  });
+  const host = $(".lv-canvas", m.body);
+  const draw = () => {
+    const {cv, w, h} = layoutCanvas(L, zoom, window.devicePixelRatio || 1);
+    cv.style.width = w + "px"; cv.style.height = h + "px";
+    host.replaceChildren(cv);
+    $("#lvZoom", m.body).textContent = Math.round(zoom * 100) + "%";
+  };
+  const setZoom = z => { zoom = Math.max(0.25, Math.min(4, z)); draw(); };
+  m.body.addEventListener("click", e => {
+    const b = e.target.closest("[data-z]"); if (!b) return;
+    if (b.dataset.z === "fit") {
+      const avail = host.clientWidth - 24 - LV.MARGIN - 60;
+      setZoom(avail / (L.board_l * LV.MIN_ROW_H / L.part_w));
+      return;
+    }
+    const v = parseFloat(b.dataset.z);
+    setZoom(v === 0 ? 1 : zoom + v);
+  });
+  host.addEventListener("wheel", e => { if (e.ctrlKey) { e.preventDefault(); setZoom(zoom + (e.deltaY < 0 ? 0.1 : -0.1)); } }, {passive: false});
+  $("[data-a=png]", m.head).onclick = async () => {
+    const {cv} = layoutCanvas(L, zoom, 2);
+    download(await canvasToBlob(cv), `BH排列圖_${safeIdx(idx)}.png`, "image/png");
+  };
+  draw();
+}
+
+function openLayoutList(r) {
+  assignScrapNumbers(r);
+  const layouts = r.cut_details.filter(ct => ct.layout);
+  if (!layouts.length) { showInfo("提示", "目前沒有多段切割片次，無排列圖可預覽。\n（單段切割模式或每片僅排一種長度時不會產生排列圖）"); return; }
+  const checked = new Set();
+  const m = openModal({
+    title: `選擇要預覽／下載的排列圖（共 ${layouts.length} 個多段切割片次）`, size: "md",
+    bodyHTML: `<div class="toolbar"><button class="btn btn-ghost btn-sm" data-a="all">☑ 全選</button><button class="btn btn-ghost btn-sm" data-a="none">☐ 取消全選</button><span class="grow"></span><span class="count" id="llCount">已選 0 項</span></div>
+      <div class="hint">勾選後可批次下載或匯出合併 PDF；點兩下單一列開啟預覽</div><div class="ll-host" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>`,
+    footHTML: `<button class="btn btn-primary" data-a="png">💾 批次下載 PNG（ZIP）</button><button class="btn btn-violet" data-a="pdf">📄 匯出合併 PDF</button>`
+  });
+  const host = $(".ll-host", m.body);
+  const render = () => {
+    host.innerHTML = gridHTML(["選取", "片次", "板別", "採購規格", "排數", "構件"], layouts.map((ct, i) => ({
+      cls: (checked.has(i) ? "picked" : (i % 2 ? "even" : "odd")) + " clickable", attrs: `data-i="${i}"`,
+      cells: [{html: `<input type="checkbox" data-chk="${i}" ${checked.has(i) ? "checked" : ""} aria-label="選取 ${esc(ct.idx)}">`}, ct.idx, typeLabel(ct.type), ct.board_spec, ct.layout.rows.length, ct.comp]
+    })));
+    $("#llCount", m.body).textContent = `已選 ${checked.size} 項`;
+  };
+  render();
+  m.body.addEventListener("change", e => {
+    const c = e.target.closest("[data-chk]"); if (!c) return;
+    const i = +c.dataset.chk; if (c.checked) checked.add(i); else checked.delete(i); render();
+  });
+  m.body.addEventListener("dblclick", e => { const tr = e.target.closest("tr[data-i]"); if (tr) { const ct = layouts[+tr.dataset.i]; openLayoutViewer(ct.idx, ct.layout); } });
+  m.el.addEventListener("click", async e => {
+    const a = e.target.closest("[data-a]")?.dataset.a; if (!a) return;
+    if (a === "all") { layouts.forEach((_, i) => checked.add(i)); render(); return; }
+    if (a === "none") { checked.clear(); render(); return; }
+    const sel = layouts.filter((_, i) => checked.has(i));
+    if (!sel.length) { showWarn("提示", a === "png" ? "請至少勾選一個片次再下載。" : "請至少勾選一個片次再匯出。"); return; }
+    try {
+      if (a === "png") {
+        await loadLib("jszip");
+        const zip = new JSZip();
+        for (const ct of sel) zip.file(`BH排列圖_${safeIdx(ct.idx)}.png`, await canvasToBlob(layoutCanvas(ct.layout, 1, 2).cv));
+        download(await zip.generateAsync({type: "blob"}), `BH排列圖_${stamp()}.zip`, "application/zip");
+        showOk("批次下載完成", `已打包 ${sel.length} 張排列圖（ZIP）。`);
+      } else {
+        await loadLib("jspdf");
+        const {jsPDF} = window.jspdf;
+        let doc = null;
+        for (const ct of sel) {
+          // 頁面尺寸等於排列圖實際大小（px → pt），文字大小與畫面一致
+          const {cv, w, h} = layoutCanvas(ct.layout, 1, 2);
+          const orient = w > h ? "l" : "p";
+          if (!doc) doc = new jsPDF({unit: "pt", format: [w, h], orientation: orient});
+          else doc.addPage([w, h], orient);
+          doc.addImage(cv.toDataURL("image/png"), "PNG", 0, 0, w, h);
+        }
+        doc.save(`BH排列圖_${stamp()}.pdf`);
+        showOk("匯出完成", `已匯出 ${sel.length} 張排列圖（合併 PDF）。\n\n每頁尺寸依排列圖實際大小自動調整。`);
+      }
+    } catch (err) { showError("匯出失敗", err.message); }
+  });
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   列印視窗（PDF）：報表 & 鐵板裁切排列圖
+   ═════════════════════════════════════════════════════════════════ */
+function openPrintWindow(title, styles, bodyHTML, autoPrint) {
+  const w = window.open("", "_blank");
+  if (!w) { showError("無法開啟視窗", "瀏覽器封鎖了彈出視窗，請允許本頁開啟彈出視窗後再試一次。"); return; }
+  w.document.open();
+  w.document.write(`<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><title>${esc(title)}</title><style>
+    .pbar{position:sticky;top:0;z-index:5;background:#1A3050;color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;font-family:"Microsoft JhengHei",sans-serif;font-size:14px}
+    .pbar button{background:#2B6CB0;color:#fff;border:0;border-radius:6px;padding:8px 16px;font-weight:700;cursor:pointer;font-size:14px;font-family:inherit}
+    .pbar span{opacity:.85}
+    @media print{.pbar{display:none}}
+    ${styles}</style></head><body>
+    <div class="pbar"><button onclick="window.print()">🖨 列印 / 另存 PDF</button><span>在列印視窗中，目的地選「另存為 PDF」即可存成 PDF 檔（檔名預設為：${esc(title)}）</span></div>
+    ${bodyHTML}
+    ${autoPrint ? "<script>window.addEventListener('load',function(){setTimeout(function(){window.print()},400)});<\/script>" : ""}
+    </body></html>`);
+  w.document.close();
+}
+
+function buildReportHTML(r) {
+  const p = r.params, prod = today(), pl = esc(paramLine(p));
+  const tbl = (title, cols, widths, rows) => `<section class="sec">
+    <div class="tt"><span>${esc(title)}</span><span class="dt">產出日期：${prod}</span></div><div class="pp">${pl}</div>
+    <table><colgroup>${widths.map(w => `<col style="width:${w * 100}%">`).join("")}</colgroup>
+    <thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(rw => `<tr class="${rw.cls || ""}">${rw.cells.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></section>`;
+  const z = i => i % 2 === 0 ? "odd" : "even";
+  const s1 = tbl("配料清單　BH配料報表", ["構件編號", "零件編號", "斷面規格", "長度(mm)", "數量", "材質", "備註"], [0.12, 0.12, 0.32, 0.14, 0.10, 0.10, 0.10],
+    r.bh_rows.map((row, i) => ({cls: z(i), cells: [row.comp, row.part, row.spec, row.length, row.qty, row.mat, ""]})));
+  const rows2 = [];
+  r.decomposed.forEach(d => {
+    const cw = pyRound(d.flange.unit_wt * 2 + d.web.unit_wt, 1), ct = pyRound(cw * d.qty, 1);
+    rows2.push({cls: "comp", cells: [d.comp, "", "", d.spec, d.length, d.qty, d.mat, fmtF(cw), fmtF(ct)]});
+    [d.flange, d.web].forEach((x, k) => rows2.push({cls: k ? "even" : "odd", cells: ["", x.serial || "", x.name, plSpec(x), x.length, x.total, x.mat, fmtF(x.unit_wt), fmtF(x.total_wt)]}));
+  });
+  const s2 = tbl("BH拆板明細", ["構件", "流水號", "拆板零件", "斷面規格", "長度(mm)", "數量", "材質", "單重(kg)", "總重(kg)"], [0.09, 0.10, 0.12, 0.26, 0.11, 0.08, 0.08, 0.08, 0.08], rows2);
+  const rows3 = r.purchase_list.map((x, i) => ({cls: z(i), cells: [i + 1, x.spec, x.qty, x.mat, x.unit_wt, x.total_wt, ""]}));
+  rows3.push({cls: "tot", cells: ["", `合計：共 ${r.purchase_list.length} 片`, "", "", "", sum(r.purchase_list, x => x.total_wt), ""]});
+  const s3 = tbl("採購清單　BH型鋼鋼板配料", ["NO", "採購規格(mm)", "數量", "材質", "單片重(kg)", "總重(kg)", "備註"], [0.06, 0.30, 0.10, 0.10, 0.16, 0.16, 0.12], rows3);
+  const rows4 = r.cut_details.map((ct, i) => ({cls: ct.is_scrap ? "scrap" : z(i), cells: [ct.idx, typeLabel(ct.type), ct.board_spec, ct.mat, ct.board_wt, `${ct.comp}（${ct.part_spec}）`, ct.qty, fmtF(ct.unit_wt), ct.leftover]}));
+  rows4.push({cls: "legend", cells: ["", "F=翼鈑　W=腹鈑　*=板重限制加大　♻=使用餘料（綠底）", "", "", "", "", "", "", ""]});
+  const s4 = tbl("切割明細　BH型鋼鋼板配料", ["片次", "板別", "採購規格(mm)", "材質", "板重(kg)", "構件編號（裁切尺寸）", "數量", "單重(kg)", "餘料規格/重量"], [0.06, 0.08, 0.20, 0.07, 0.09, 0.22, 0.07, 0.09, 0.12], rows4);
+  const rows5 = r.new_scraps.map((sc, i) => ({cls: z(i), cells: [`餘${pad2(i + 1)}`, sc.src, typeLabel(sc.type), sc.spec, sc.mat, sc.wt, ""]}));
+  unusedScraps(r).forEach(s => rows5.push({cls: "unused", cells: [`*${s.id}`, "—", "—", plSpec(s), s.mat, Math.round(pyRound(calcWeight(s.width, s.thick, s.length, p.density))), "未使用"]}));
+  rows5.push({cls: "tot", cells: ["", `合計：共 ${r.new_scraps.length} 件`, "", "", "", sum(r.new_scraps, s => s.wt), ""]});
+  rows5.push({cls: "legend", cells: ["", "* = 現有餘料未使用（黃底）", "", "", "", "", ""]});
+  const s5 = tbl("餘料清單　BH型鋼鋼板配料", ["餘NO", "來源片次", "板別", "餘料規格(mm)", "材質", "重量(kg)", "備註"], [0.10, 0.12, 0.12, 0.32, 0.12, 0.12, 0.10], rows5);
+  const styles = `@page{size:A4;margin:12mm}
+    body{margin:0;font-family:"PMingLiU","MingLiU","Noto Serif TC","Songti TC","Microsoft JhengHei",serif;color:#111;background:#fff}
+    .wrap{max-width:186mm;margin:0 auto;padding:10px 0}
+    .sec{page-break-after:always;margin-bottom:24px}.sec:last-child{page-break-after:auto}
+    .tt{background:#1A3050;color:#fff;font-size:11pt;padding:5px 8px;display:flex;justify-content:space-between;align-items:center}
+    .tt .dt{font-size:7pt;color:#FEB2B2}
+    .pp{background:#FFF5F5;color:#C53030;font-size:7pt;padding:3px 8px;margin-bottom:2mm}
+    table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:7pt}
+    th{background:#1A3050;color:#fff;font-size:8pt;font-weight:normal;padding:3px 2px;border:.4pt solid #888}
+    td{border:.4pt solid #888;padding:2px;text-align:center;word-break:break-all}
+    tr.odd td{background:#F7FAFC}tr.even td{background:#EBF4FF}tr.comp td{background:#D6EAF8}
+    tr.scrap td{background:#C6EFCE}tr.unused td{background:#FFF3CD}tr.tot td{background:#EDF2F7}
+    thead{display:table-header-group} tr{page-break-inside:avoid}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}`;
+  return {styles, body: `<div class="wrap">${s1}${s2}${s3}${s4}${s5}</div>`};
+}
+
+function buildLayoutPrintHTML(r, modifiedSpecs) {
+  const p = r.params, sm = serialMap(r), prod = today();
+  const PT = 0.352778, W = 210, H = 297, ML = 14, MR = 14, MT = 24, MB = 12, GAP = 5;
+  const COL_W = (W - ML - MR - GAP) / 2, FS = 12, FS_HDR = 13, FS_SUB = 10;
+  const LINE_H = (FS + 3) * PT, BOX_H = LINE_H * 7 + 10;
+  const rows_per_page = Math.max(1, Math.floor((H - MT - MB) / (BOX_H + 6)));
+  const GREEN = "#1A6B1A", RED = "#C53030";
+  const T = (x, y, s, o = {}) => `<text x="${x.toFixed(2)}" y="${y.toFixed(2)}" font-size="${((o.size || FS) * PT).toFixed(3)}" ${o.bold ? 'font-weight="bold"' : ""} fill="${o.fill || "#000"}" text-anchor="${o.anchor || "start"}">${esc(s)}</text>`;
+  const pages = []; let cur = null, page_no = 0;
+  const header = mat => {
+    cur.push(T(ML, 10, mat ? `材質:${mat}` : "", {size: FS_SUB + 1, bold: true, fill: RED}));
+    cur.push(T(W / 2, 10, `${p.proj_no}-BH拆版`, {size: FS_HDR, bold: true, anchor: "middle"}));
+    cur.push(T(W - MR, 10, prod, {size: FS_SUB, anchor: "end"}));
+    cur.push(T(ML, 17, `${p.proj_no} ${p.proj_name}`, {size: FS_SUB}));
+  };
+  const newPage = mat => { cur = []; pages.push(cur); page_no++; header(mat); };
+  const footer = () => cur.push(T(W / 2, H - (MB - 4), `第 ${page_no} 頁`, {size: FS_SUB, anchor: "middle"}));
+  const blankNote = (col, row_i) => cur.push(T(ML + col * (COL_W + GAP), MT + row_i * (BOX_H + 6) + BOX_H + 4, "以下空白", {size: FS_SUB}));
+
+  const drawBox = (x, y, ct) => {
+    const mb = specRe.exec(ct.board_spec);
+    const isMod = !!(mb && modifiedSpecs && modifiedSpecs.has(`${+mb[1]},${+mb[2]},${+mb[3]}`));
+    const col = isMod ? GREEN : "#000";
+    cur.push(T(x, y - 1.5, `${ct.idx} ${ct.board_spec} × ${ct._qty}  PC`, {fill: col}));
+    cur.push(`<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${COL_W.toFixed(2)}" height="${BOX_H.toFixed(2)}" fill="none" stroke="${col}" stroke-width="${((isMod ? 1.2 : 0.7) * PT).toFixed(3)}"/>`);
+    let ly = y + LINE_H + 2; const bottom = y + BOX_H - 3;
+    const line = (s, red) => { if (ly > bottom) return; cur.push(T(x + 3, ly, s, {fill: red ? RED : col})); ly += LINE_H; };
+    const left = ct.leftover || "";
+    if (ct.layout) {
+      const L = ct.layout, counter = new Map();
+      L.rows.forEach(rw => rw.parts.forEach(pt => { const k = JSON.stringify([pt.name, pt.length]); counter.set(k, (counter.get(k) || 0) + 1); }));
+      counter.forEach((cnt, k) => { const [name, length] = JSON.parse(k); line(`${L.thick}*${L.part_w}*${length}*${cnt}(${sm[name] !== undefined ? sm[name] : name})`); });
+    } else {
+      const comps = _uniq((ct.comp || "").split("、")), m = specRe.exec(ct.part_spec || "");
+      if (m) {
+        const qty_each = comps.length ? Math.max(1, Math.floor((ct.qty || 1) / comps.length)) : ct.qty;
+        comps.forEach(c => line(`${m[1]}*${m[2]}*${m[3]}*${qty_each}(${sm[c] !== undefined ? sm[c] : c})`));
+      } else line(`${ct.part_spec} × ${ct.qty}（${ct.comp}）`);
+    }
+    if (left && left !== "無餘料") line(`餘料：${left.split("（")[0]}`, true);
+  };
+
+  // 按材質分組（保持原始順序），每換一種材質換新頁
+  const groups = [];
+  r.cut_details.forEach(ct => {
+    const mat = ct.mat || "";
+    if (!groups.length || groups[groups.length - 1].mat !== mat) groups.push({mat, cts: []});
+    groups[groups.length - 1].cts.push(ct);
+  });
+  let col = 0, row_i = 0;
+  groups.forEach((g, gi) => {
+    if (gi > 0) { blankNote(col, row_i); footer(); }
+    col = 0; row_i = 0; newPage(g.mat);
+    // 合併完全相同的板次（板規格 + 構件 + 餘料相同 → 數量加總）
+    const seen = new Map(), merged = [];
+    g.cts.forEach(ct => {
+      const k = JSON.stringify([ct.board_spec, ct.comp || "", ct.leftover || ""]);
+      if (seen.has(k)) seen.get(k)._qty++;
+      else { const c2 = Object.assign({}, ct, {_qty: 1}); seen.set(k, c2); merged.push(c2); }
+    });
+    merged.forEach(ct => {
+      drawBox(ML + col * (COL_W + GAP), MT + row_i * (BOX_H + 6), ct);
+      col++;
+      if (col >= 2) { col = 0; row_i++; }
+      if (row_i >= rows_per_page) { row_i = 0; col = 0; footer(); newPage(g.mat); }
+    });
+  });
+  blankNote(col, row_i); footer();
+
+  const styles = `@page{size:A4;margin:0}
+    body{margin:0;background:#718096;font-family:"PMingLiU","MingLiU","Noto Serif TC","Songti TC","Microsoft JhengHei",serif}
+    .page{width:210mm;height:297mm;background:#fff;margin:12px auto;box-shadow:0 2px 10px rgba(0,0,0,.35);overflow:hidden}
+    .page svg{display:block;width:210mm;height:297mm}
+    @media print{body{background:#fff}.page{margin:0;box-shadow:none;page-break-after:always}.page:last-child{page-break-after:auto}}`;
+  return {styles, body: pages.map(pg => `<div class="page"><svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${pg.join("")}</svg></div>`).join("")};
+}
+
+function openReportPrint(r, title) {
+  const {styles, body} = buildReportHTML(r);
+  openPrintWindow(title, styles, body, true);
+}
+function openLayoutPrint(r, title, autoPrint) {
+  if (!r.cut_details.length) { showInfo("提示", "沒有切割片次可輸出。"); return; }
+  const {styles, body} = buildLayoutPrintHTML(r, r.modified_specs || null);
+  openPrintWindow(title, styles, body, autoPrint);
+  setStatus("排列圖預覽已開啟。");
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   Excel 報表（對應 write_xlsx）
+   ═════════════════════════════════════════════════════════════════ */
+async function exportXlsx(r, filename) {
+  try {
+    setStatus("⏳ 正在產生 Excel...");
+    await loadLib("exceljs");
+    const p = r.params, prod = today(), pl = paramLine(p);
+    const wb = new ExcelJS.Workbook();
+    const FILL = c => ({type: "pattern", pattern: "solid", fgColor: {argb: "FF" + c}});
+    const BORDER = {top: {style: "thin"}, left: {style: "thin"}, bottom: {style: "thin"}, right: {style: "thin"}};
+    const WHITE = {argb: "FFFFFFFF"};
+    const widths = (ws, ws_) => ws_.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+    const title = (ws, t, n) => {
+      ws.mergeCells(1, 1, 1, n - 1);
+      const c = ws.getCell(1, 1); c.value = t; c.font = {bold: true, size: 13, color: WHITE}; c.fill = FILL("1E3A5F"); c.alignment = {horizontal: "left", vertical: "middle"};
+      const c2 = ws.getCell(1, n); c2.value = `產出日期：${prod}`; c2.font = {size: 10, color: WHITE}; c2.fill = FILL("1E3A5F"); c2.alignment = {horizontal: "right", vertical: "middle"};
+      ws.getRow(1).height = 22;
+      ws.mergeCells(2, 1, 2, n);
+      const c3 = ws.getCell(2, 1); c3.value = pl; c3.font = {size: 9, color: {argb: "FFC53030"}}; c3.fill = FILL("FFF5F5"); c3.alignment = {horizontal: "left", vertical: "middle"};
+      ws.getRow(2).height = 16;
+    };
+    const header = (ws, row, hs) => {
+      hs.forEach((h, j) => {
+        const c = ws.getCell(row, j + 1); c.value = h; c.font = {bold: true, color: WHITE, size: 10}; c.fill = FILL("1E3A5F");
+        c.alignment = {horizontal: "center", vertical: "middle", wrapText: true}; c.border = BORDER;
+      });
+      ws.getRow(row).height = 20;
+    };
+    const cell = (ws, rr, cc, v, o = {}) => {
+      const c = ws.getCell(rr, cc); c.value = v;
+      c.font = {bold: !!o.bold, size: 10}; c.alignment = {horizontal: o.align || "center", vertical: "middle"}; c.border = BORDER;
+      if (o.bg) c.fill = FILL(o.bg);
+      ws.getRow(rr).height = 18;
+    };
+    const z = i => i % 2 === 0 ? "F7FAFC" : "EBF4FF";
+
+    // 1. 配料清單
+    let ws = wb.addWorksheet("配料清單");
+    title(ws, "配料清單　BH配料報表", 6); header(ws, 3, ["構件編號", "零件編號", "斷面規格", "長度(mm)", "數量", "材質"]); widths(ws, [12, 12, 22, 12, 8, 8]);
+    r.bh_rows.forEach((row, i) => {
+      const rr = i + 4, bg = z(i);
+      [row.comp, row.part, row.spec, row.length, row.qty, row.mat].forEach((v, k) => cell(ws, rr, k + 1, v, {bg, align: k === 2 ? "left" : "center"}));
+    });
+
+    // 2. BH拆板明細
+    ws = wb.addWorksheet("BH拆板明細");
+    title(ws, "BH拆板明細", 11);
+    header(ws, 3, ["構件編號", "零件編號", "拆板零件", "流水號", "流水號(W/F)", "斷面規格", "長度(mm)", "數量", "材質", "單重量(kg)", "總重量(kg)"]);
+    widths(ws, [12, 12, 12, 12, 16, 22, 12, 8, 8, 12, 12]);
+    let rr = 4;
+    r.decomposed.forEach(d => {
+      const cw = pyRound(d.flange.unit_wt * 2 + d.web.unit_wt, 1), ct = pyRound(cw * d.qty, 1);
+      for (let c = 1; c <= 11; c++) cell(ws, rr, c, "", {bg: "D6EAF8"});
+      cell(ws, rr, 1, d.comp, {bold: true, bg: "D6EAF8"}); cell(ws, rr, 6, d.spec, {bold: true, bg: "D6EAF8", align: "left"});
+      cell(ws, rr, 7, d.length, {bold: true, bg: "D6EAF8"}); cell(ws, rr, 8, d.qty, {bold: true, bg: "D6EAF8"});
+      cell(ws, rr, 9, d.mat, {bold: true, bg: "D6EAF8"}); cell(ws, rr, 10, cw, {bold: true, bg: "D6EAF8"}); cell(ws, rr, 11, ct, {bold: true, bg: "D6EAF8"});
+      rr++;
+      [[d.flange, "F"], [d.web, "W"]].forEach(([x, suf]) => {
+        const sn = x.serial || "";
+        [d.comp, d.part || "", x.name, sn, sn ? sn + suf : "", plSpec(x), x.length, x.total, x.mat, x.unit_wt, x.total_wt]
+          .forEach((v, k) => cell(ws, rr, k + 1, v, {align: (k === 2 || k === 5) ? "left" : "center"}));
+        rr++;
+      });
+    });
+
+    // 3. BH合板清單
+    ws = wb.addWorksheet("BH合板清單");
+    title(ws, "BH合板清單", 5); header(ws, 3, ["構件編號", "流水號(W/F)", "斷面規格", "長度(mm)", "數量"]); widths(ws, [12, 16, 22, 12, 8]);
+    rr = 4;
+    r.decomposed.forEach(d => {
+      [[d.flange, "F", "EBF4FF"], [d.web, "W", "F7FAFC"]].forEach(([x, suf, bg]) => {
+        const sn = x.serial || "";
+        [d.comp, sn ? sn + suf : "", plSpec(x), x.length, x.total].forEach((v, k) => cell(ws, rr, k + 1, v, {bg, align: k === 2 ? "left" : "center"}));
+        rr++;
+      });
+    });
+
+    // 4. 板厚清單
+    ws = wb.addWorksheet("板厚清單");
+    title(ws, "板厚清單", 6); header(ws, 3, ["流水號(W/F)", "斷面規格", "數量", "材質", "單重量(kg)", "總重量(kg)"]); widths(ws, [16, 22, 8, 8, 14, 14]);
+    thickGroups(r).forEach((g, i) => {
+      [g.sn_wf, g.spec, g.qty, g.mat, pyRound(g.unit_wt, 1), pyRound(g.total_wt, 1)].forEach((v, k) => cell(ws, i + 4, k + 1, v, {bg: z(i), align: k === 1 ? "left" : "center"}));
+    });
+
+    // 5. 採購清單
+    ws = wb.addWorksheet("採購清單");
+    title(ws, "採購清單　BH型鋼鋼板配料", 7); header(ws, 3, ["NO", "採購規格(mm)", "採購數量", "材質", "單片重量(kg)", "總重量(kg)", "備註"]); widths(ws, [6, 24, 10, 8, 14, 14, 16]);
+    const merged = mergePurchase(r.purchase_list);
+    merged.forEach((v, i) => {
+      [i + 1, v.spec, v.qty, v.mat, v.unit_wt, Math.round(v.total_wt)].forEach((x, k) => cell(ws, i + 4, k + 1, x, {bg: z(i), align: k === 1 ? "left" : "center"}));
+    });
+    let rn = merged.length + 4;
+    const su = usedScraps(r);
+    if (su.length) {
+      ws.mergeCells(rn, 1, rn, 7);
+      const c = ws.getCell(rn, 1);
+      c.value = "♻ 餘料使用：" + su.map((s, i) => `既${pad2(i + 1)} ${plSpec(s)}×${s.qty}片`).join("　");
+      c.font = {size: 9, color: {argb: "FF276749"}}; c.fill = FILL("C6EFCE");
+      rn++;
+    }
+    ws.mergeCells(rn, 1, rn, 5);
+    ws.getCell(rn, 1).value = `合計：共 ${sum(merged, v => v.qty)} 片（不含餘料）`; ws.getCell(rn, 1).font = {bold: true, size: 10};
+    ws.getCell(rn, 6).value = Math.round(sum(merged, v => v.total_wt)); ws.getCell(rn, 6).font = {bold: true, size: 10};
+
+    // 6. 切割明細
+    ws = wb.addWorksheet("切割明細");
+    title(ws, "切割明細　BH型鋼鋼板配料", 9);
+    header(ws, 3, ["片次", "板別", "採購規格(mm)", "材質", "板重(kg)", "構件編號（裁切尺寸mm）", "數量", "單板重(kg)", "餘料規格(mm)/重量(kg)"]);
+    widths(ws, [6, 10, 22, 8, 10, 28, 6, 10, 24]);
+    r.cut_details.forEach((ct, i) => {
+      const bg = ct.is_scrap ? "C6EFCE" : z(i);
+      [ct.idx, typeLabel(ct.type, true), ct.board_spec, ct.mat, ct.board_wt, `${ct.comp}（${ct.part_spec}）`, ct.qty, ct.unit_wt, ct.leftover]
+        .forEach((v, k) => cell(ws, i + 4, k + 1, v, {bg, align: [2, 5, 8].includes(k) ? "left" : "center"}));
+    });
+    let lr = r.cut_details.length + 4;
+    ws.mergeCells(lr, 1, lr, 9);
+    ws.getCell(lr, 1).value = "F=翼鈑　W=腹鈑　*=因板重限制加大　♻=使用現有餘料（綠色底）";
+    ws.getCell(lr, 1).font = {size: 9, italic: true, color: {argb: "FF666666"}};
+
+    // 7. 餘料清單
+    ws = wb.addWorksheet("餘料清單");
+    title(ws, "餘料清單　BH型鋼鋼板配料", 6); header(ws, 3, ["餘NO", "來源片次", "板別", "餘料規格(mm)", "材質", "重量(kg)"]); widths(ws, [8, 10, 10, 24, 8, 12]);
+    rr = 4;
+    r.new_scraps.forEach((sc, i) => {
+      [`餘${pad2(i + 1)}`, sc.src, typeLabel(sc.type, true), sc.spec, sc.mat, sc.wt].forEach((v, k) => cell(ws, rr, k + 1, v, {bg: z(i), align: k === 3 ? "left" : "center"}));
+      rr++;
+    });
+    unusedScraps(r).forEach(s => {
+      [`*${s.id}`, "—", "—", plSpec(s), s.mat, Math.round(pyRound(calcWeight(s.width, s.thick, s.length, p.density)))]
+        .forEach((v, k) => cell(ws, rr, k + 1, v, {bg: "FFF3CD", align: k === 3 ? "left" : "center"}));
+      rr++;
+    });
+    ws.mergeCells(rr, 1, rr, 5);
+    ws.getCell(rr, 1).value = `餘料合計：共 ${r.new_scraps.length} 件`; ws.getCell(rr, 1).font = {bold: true};
+    ws.getCell(rr, 6).value = sum(r.new_scraps, s => s.wt); ws.getCell(rr, 6).font = {bold: true};
+    ws.getCell(rr + 1, 1).value = "* = 現有餘料未使用"; ws.getCell(rr + 1, 1).font = {size: 9, italic: true, color: {argb: "FF666666"}};
+
+    const buf = await wb.xlsx.writeBuffer();
+    download(new Blob([buf], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), filename);
+    setStatus(`Excel 已下載：${filename}`);
+  } catch (e) { showError("儲存失敗", e.message); setStatus("Excel 匯出失敗。"); }
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   採購修正（對應 PurchaseEditWindow）
+   ═════════════════════════════════════════════════════════════════ */
+function buildPeRows(r) {
+  return mergePurchase(r.purchase_list).map(v => {
+    const m = specRe.exec(v.spec);
+    const thick = m ? +m[1] : 0, width = m ? +m[2] : 0, length = m ? +m[3] : 0;
+    return {thick, width, length, orig_width: width, orig_length: length, qty: v.qty, mat: v.mat, orig_spec: v.spec, note: ""};
+  });
+}
+const peWt = (r, row) => pyRound(calcWeight(row.width, row.thick, row.length, r.params.density), 0);
+const peSpec = row => `PL${row.thick}×${row.width}×${row.length}`;
+function checkSize(r, row, orig_spec) {
+  const kerf = r.params.new_kerf, trim = r.params.new_trim, cur_w = row.width, cur_l = row.length;
+  const mo = specRe.exec(orig_spec);
+  if (!mo) return [true, ""];
+  const ot = +mo[1], ow = +mo[2], ol = +mo[3];
+  if (cur_w === ow && cur_l === ol) return [true, ""];
+  if (cur_w >= ow && cur_l >= ol) return [true, ""];
+  const errors = []; let matched = false;
+  const dims = ct => {
+    const qty = ct.qty ?? 1, L = ct.layout;
+    if (L) {
+      const nr = L.rows.filter(x => x.parts && x.parts.length).length;
+      let max_l = 0; L.rows.forEach(x => x.parts.forEach(pp => { if (pp.length > max_l) max_l = pp.length; }));
+      return [nr * L.part_w + Math.max(0, nr - 1) * kerf + trim * 2, max_l + trim * 2];
+    }
+    const ps = ct.part_spec || "";
+    const mp = specRe.exec(ps);
+    if (mp) return [qty * +mp[2] + (qty - 1) * kerf + trim * 2, +mp[3] + trim * 2];
+    const mp2 = /^PL(\d+)×(\d+)×多段\((.+)\)/.exec(ps);
+    if (mp2) {
+      const nr = (mp2[3].match(/排/g) || []).length, nums = (mp2[3].match(/\d+/g) || []).map(Number);
+      return [nr * +mp2[2] + Math.max(0, nr - 1) * kerf + trim * 2, (nums.length ? Math.max(...nums) : 0) + trim * 2];
+    }
+    return [null, null];
+  };
+  const check = strict => {
+    r.cut_details.forEach(ct => {
+      if (ct.is_scrap) return;
+      const mb = specRe.exec(ct.board_spec); if (!mb) return;
+      if (+mb[1] !== ot) return;
+      if (strict && +mb[2] !== ow && +mb[3] !== ol) return;
+      const [nw, nl] = dims(ct); if (nw === null || nl === null) return;
+      matched = true;
+      if (cur_w < nw) errors.push(`板寬不足！需要 ${nw}mm，目前 ${cur_w}mm`);
+      if (cur_l < nl) errors.push(`板長不足！需要 ${nl}mm，目前 ${cur_l}mm`);
+    });
+  };
+  check(true);
+  if (!matched) check(false);   // fallback：只比對厚度
+  if (!matched) return [true, ""];
+  if (errors.length) return [false, _uniq(errors).join("；")];
+  return [true, ""];
+}
+function makeModifiedResult(base, rows) {
+  const r = structuredClone(base);
+  const p = r.params, density = p.density, trim = p.new_trim, kerf = p.new_kerf;
+  const modified = new Set();
+  rows.forEach(row => {
+    const mo = specRe.exec(row.orig_spec);
+    if (mo && (row.width !== +mo[2] || row.length !== +mo[3])) modified.add(`${row.thick},${row.width},${row.length}`);
+  });
+  r.modified_specs = modified;
+  r.purchase_list = rows.map(row => { const wt = Math.trunc(peWt(base, row)); return {spec: peSpec(row), qty: row.qty, mat: row.mat, unit_wt: wt, total_wt: wt * row.qty}; });
+  const dim_map = new Map();
+  rows.forEach(row => { const mo = specRe.exec(row.orig_spec); if (mo) dim_map.set(`${+mo[1]},${+mo[2]},${+mo[3]}`, row); });
+  const new_scraps = [];
+  r.cut_details.forEach(ct => {
+    if (ct.is_scrap) return;
+    const m = specRe.exec(ct.board_spec); if (!m) return;
+    const row = dim_map.get(`${+m[1]},${+m[2]},${+m[3]}`); if (!row) return;
+    const nbw = row.width, nbl = row.length;
+    const nwt = Math.trunc(calcWeight(nbw, row.thick, nbl, density));
+    let used_w, used_l;
+    const L = ct.layout;
+    if (L) {
+      const nr = L.rows.filter(x => x.parts && x.parts.length).length;
+      used_w = nr * L.part_w + Math.max(0, nr - 1) * kerf + trim * 2;
+      let max_used = 0;
+      L.rows.forEach(x => { let cl = trim; x.parts.forEach(pp => { cl += pp.length + kerf; }); max_used = Math.max(max_used, cl - kerf); });
+      used_l = max_used + trim;
+    } else {
+      const mp = specRe.exec(ct.part_spec || "");
+      if (mp) { const q = ct.qty ?? 1; used_w = q * +mp[2] + (q - 1) * kerf + trim * 2; used_l = +mp[3] + trim * 2; }
+      else { used_w = nbw; used_l = nbl; }
+    }
+    const lw_ = nbw - used_w, ll_ = nbl - used_l, specs = [];
+    if (lw_ > 0) {
+      const lw = Math.trunc(pyRound(calcWeight(lw_, row.thick, nbl, density), 0));
+      specs.push(`PL${row.thick}×${lw_}×${nbl}（${lw}kg）`);
+      new_scraps.push({src: ct.idx, type: ct.type, spec: `PL${row.thick}×${lw_}×${nbl}`, mat: ct.mat, wt: lw});
+    }
+    if (ll_ > 0) {
+      const ll = Math.trunc(pyRound(calcWeight(nbw, row.thick, ll_, density), 0));
+      specs.push(`PL${row.thick}×${nbw}×${ll_}（${ll}kg）`);
+      new_scraps.push({src: ct.idx, type: ct.type, spec: `PL${row.thick}×${nbw}×${ll_}`, mat: ct.mat, wt: ll});
+    }
+    ct.board_spec = peSpec(row); ct.board_wt = nwt; ct.leftover = specs.length ? specs.join("　") : "無餘料";
+  });
+  r.new_scraps = new_scraps;
+  return r;
+}
+function openPurchaseEdit() {
+  if (!needResult()) return;
+  const r = S.result;
+  if (!S.peRows) S.peRows = buildPeRows(r);
+  const m = openModal({
+    title: "新採購清單　── 可修改板寬 / 板長 / 備註（板厚不可調整）", size: "lg",
+    bodyHTML: `<div class="pe-host" style="flex:1;min-height:0;display:flex;flex-direction:column"></div><div class="pe-err warn-note" style="margin-top:8px;white-space:pre-wrap"></div>`,
+    footHTML: `<button class="btn btn-gray" data-a="reset">↩ 重設</button><button class="btn btn-slate" data-a="debug">🔍 診斷</button><span class="grow"></span><button class="btn btn-green" data-a="confirm">✅ 完成</button>`
+  });
+  const host = $(".pe-host", m.body), errBox = $(".pe-err", m.body);
+  const refresh = () => {
+    const rows = S.peRows; let tw = 0, tq = 0, hasErr = false; const errs = [];
+    const html = rows.map((row, i) => {
+      const wt = peWt(r, row), tot = wt * row.qty;
+      const [ok, msg] = checkSize(r, row, row.orig_spec);
+      const changed = row.width !== row.orig_width || row.length !== row.orig_length;
+      if (!ok) { hasErr = true; errs.push(`• NO ${i + 1}　${peSpec(row)}：${msg}`); }
+      tw += tot; tq += row.qty;
+      return {cls: !ok ? "error" : changed ? "changed" : (i % 2 ? "even" : "odd"), attrs: `data-i="${i}" ${!ok ? `title="${esc(msg)}"` : ""}`,
+        cells: [i + 1, row.thick,
+          {html: `<input class="cellbox" data-k="width" value="${row.width}" inputmode="numeric" aria-label="板寬">`},
+          {html: `<input class="cellbox" data-k="length" value="${row.length}" inputmode="numeric" aria-label="板長">`},
+          row.qty, row.mat, Math.trunc(wt), Math.trunc(tot),
+          {html: `<input class="cellbox note" data-k="note" value="${esc(row.note || "")}" placeholder="（如：調整板片大小說明）" aria-label="備註">`},
+          row.orig_spec]};
+    });
+    html.push({cls: "tot", cells: ["", "合計", "", "", tq, "", "總重(kg)：", fmtInt(tw), "", ""]});
+    host.innerHTML = gridHTML(["NO", "板厚(mm)", "板寬(mm)", "板長(mm)", "數量", "材質", "單片重(kg)", "總重(kg)", "備註", "原始規格"], html);
+    errBox.textContent = hasErr ? "⚠ 以下項目尺寸不足（紅色底色），無法裁切：\n" + errs.join("\n") : "";
+    const btn = $("[data-a=confirm]", m.foot);
+    btn.disabled = hasErr; btn.textContent = hasErr ? "✅ 完成（有錯誤）" : "✅ 完成";
+  };
+  host.addEventListener("change", e => {
+    const inp = e.target.closest("input[data-k]"); if (!inp) return;
+    const i = +inp.closest("tr").dataset.i, row = S.peRows[i], k = inp.dataset.k;
+    if (k === "note") { row.note = inp.value; return; }
+    let v;
+    try { v = pyInt(inp.value); if (v < 1 || v > 99999) throw new Error(); }
+    catch (err) { showWarn("輸入錯誤", `請輸入 1 ~ 99999 之間的整數（mm）。`); inp.value = row[k]; return; }
+    row[k] = v; refresh();
+    const [ok, msg] = checkSize(r, row, row.orig_spec);
+    if (!ok) showWarn("尺寸不足", `⚠ 鐵板片數不足，無法裁切！\n\n${msg}\n\n請調大板寬或板長。`);
+  });
+  host.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("input[data-k]")) e.target.blur(); });
+  m.foot.addEventListener("click", async e => {
+    const a = e.target.closest("button")?.dataset.a;
+    if (a === "reset") { S.peRows = buildPeRows(r); S.peResult = null; refresh(); setStatus("新採購清單已重設為原始採購清單。"); }
+    if (a === "debug") {
+      let t = "=== 診斷報告 ===\n\npurchase_list rows:\n";
+      S.peRows.forEach(row => { t += `  orig=${row.orig_spec} cur_w=${row.width} cur_l=${row.length}\n`; });
+      t += "\ndim_map keys (thick,width,length):\n";
+      S.peRows.forEach(row => { const mo = specRe.exec(row.orig_spec); if (mo) t += `  (${+mo[1]}, ${+mo[2]}, ${+mo[3]})\n`; });
+      t += "\ncut_details board_spec → parsed key:\n";
+      r.cut_details.forEach(ct => { if (ct.is_scrap) return; const mm = specRe.exec(ct.board_spec); t += mm ? `  ${ct.board_spec} → (${+mm[1]}, ${+mm[2]}, ${+mm[3]})\n` : `  ${ct.board_spec} → ❌ no match\n`; });
+      t += "\n_check_size 結果:\n";
+      S.peRows.forEach(row => { const [ok, er] = checkSize(r, row, row.orig_spec); t += `  ${row.orig_spec} → ${ok ? "✅" : "❌ " + er}\n`; });
+      t += "\n_make_modified_result leftover:\n";
+      makeModifiedResult(r, S.peRows).cut_details.forEach(ct => { if (!ct.is_scrap) t += `  ${ct.board_spec} leftover=${ct.leftover ?? "?"}\n`; });
+      const dm = openModal({title: "診斷", size: "md", bodyHTML: `<pre class="diag">${esc(t)}</pre>`});
+      dm.body.style.maxHeight = "70vh";
+    }
+    if (a === "confirm") {
+      const errors = [];
+      S.peRows.forEach(row => { const [ok, msg] = checkSize(r, row, row.orig_spec); if (!ok) errors.push(`• PL${row.thick}×${row.width}×${row.length}：${msg}`); });
+      if (errors.length) { showError("無法完成 — 尺寸不足", `以下項目尺寸不足（紅色底色），無法裁切：\n\n${errors.join("\n")}\n\n請調大板寬或板長後再完成。`); return; }
+      S.peResult = makeModifiedResult(r, S.peRows);
+      m.close();
+      showOk("完成", "新採購清單已套用！\n可點擊「新預覽」查看結果。");
+      setStatus("新採購清單已套用。");
+    }
+  });
+  refresh();
+}
+function getPeResult(silent) {
+  if (S.peResult) return S.peResult;
+  if (!silent) showWarn("提示", "請先開啟「📋 新採購清單」，修改後按「✅ 完成」。");
+  return null;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   信暐訂購單（對應 OrderSelectWindow / write_order_xlsx）
+   ═════════════════════════════════════════════════════════════════ */
+function orderMerge(items) {
+  const map = new Map();
+  items.forEach(it => {
+    const k = JSON.stringify([it.mat, it.thick, it.width, it.length, it.note || ""]);
+    if (!map.has(k)) map.set(k, {mat: it.mat, thick: it.thick, width: it.width, length: it.length, note: it.note || "", qty: 0});
+    map.get(k).qty += it.qty;
+  });
+  return Array.from(map.values());
+}
+async function writeOrderXlsx(proj_name, proj_no, order_date, items) {
+  await loadLib("exceljs");
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(b64ToBytes(ORDER_TEMPLATE_B64).buffer);
+  const ws = wb.getWorksheet("世界油箱");
+  // 範本「項次」欄是共用公式（shared formula），先轉成一般公式，覆寫主儲存格時才不會出錯
+  ws.eachRow({includeEmpty: false}, row => row.eachCell({includeEmpty: false}, c => {
+    if (c.type === ExcelJS.ValueType.Formula) {
+      const f = c.formula;
+      if (f) c.value = {formula: f}; else c.value = null;
+    }
+  }));
+  const fill = (row, col, val, align = "left", extra = {}) => {
+    const c = ws.getCell(row, col);
+    c.value = val;
+    c.style = Object.assign({}, c.style, {font: {name: "標楷體", size: 14}, alignment: Object.assign({horizontal: align, vertical: "middle"}, extra)});
+  };
+  fill(3, 1, `工程名稱:${proj_name}                       工程編號:${proj_no}                                        訂購日期:${order_date}`);
+  const merged = orderMerge(items), MAX = 19, notes = [];
+  merged.slice(0, MAX).forEach((it, i) => {
+    const r = 6 + i;
+    fill(r, 1, i + 1, "center"); fill(r, 3, it.mat, "center"); fill(r, 4, "PL"); fill(r, 5, it.thick);
+    fill(r, 6, "X", "center"); fill(r, 7, it.width); fill(r, 8, "X", "center"); fill(r, 9, it.length);
+    fill(r, 14, it.qty); fill(r, 15, "片", "center");
+    if (it.note) notes.push(`項次${i + 1}：${it.note}`);
+  });
+  // 範本的 R 欄是合併的「備註」區塊，逐列寫入會落在合併儲存格內；改為集中寫入 R8 備註欄
+  if (notes.length) fill(8, 18, "備註:\n" + notes.join("\n"), "left", {vertical: "top", wrapText: true});
+  wb.calcProperties.fullCalcOnLoad = true;
+  const buf = await wb.xlsx.writeBuffer();
+  return {blob: new Blob([buf], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), count: merged.length, truncated: merged.length > MAX};
+}
+function orderPreviewHTML(proj_name, proj_no, order_date, items) {
+  const merged = orderMerge(items).slice(0, 19);
+  const notes = merged.map((it, i) => it.note ? `項次${i + 1}：${it.note}` : "").filter(Boolean);
+  const sideNotes = `備註:${notes.length ? "\n" + notes.join("\n") : ""}\n\n1.決議分包商：　　　　　　承攬\n\n2.單價:\n\n3.總價:\n\n4.其它:   □ 未稅   □ 含稅\n\n5.交貨地點:\n\n核准:　　　審核　　　主辦:`;
+  let rows = "";
+  for (let i = 0; i < 19; i++) {
+    const it = merged[i];
+    rows += `<tr><td class="c">${i + 1}</td><td></td><td class="c">${it ? esc(it.mat) : ""}</td>
+      <td>${it ? `PL ${it.thick} X ${it.width} X ${it.length}` : ""}</td><td class="c">${it ? it.qty : ""}</td><td class="c">${it ? "片" : ""}</td><td></td><td></td>
+      ${i === 0 ? `<td class="notes" rowspan="20">${esc(sideNotes)}</td>` : ""}</tr>`;
+  }
+  rows += `<tr><td colspan="4" class="c">合計</td><td class="c">${sum(merged, it => it.qty)}</td><td></td><td></td><td></td></tr>`;
+  return `<div class="order-sheet"><h2>信 暐 鋼 構 股 份 有 限 公 司</h2><h3>訂購單</h3>
+    <div class="info">工程名稱:${esc(proj_name)}　　　　　工程編號:${esc(proj_no)}　　　　　訂購日期:${esc(order_date)}</div>
+    <div class="info">廠商:　　　　　　　　電話:　　　　　　　　傳真:　　　　　　　　交貨日期:</div>
+    <table><thead><tr><th>項次</th><th>預算編號</th><th>材質</th><th>規　格</th><th>數量</th><th>單位</th><th>重量</th><th>單價</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="hint" style="margin-top:8px;font-family:var(--font)">※ 此為預覽示意，實際格式以下載的 Excel 訂購單為準。</div></div>`;
+}
+function openOrderSelect(r) {
+  const p = r.params, density = p.density;
+  const map = new Map();
+  r.purchase_list.forEach(x => {
+    const m = specRe.exec(x.spec); if (!m) return;
+    const k = JSON.stringify([x.mat, +m[1], +m[2], +m[3]]);
+    if (!map.has(k)) map.set(k, {mat: x.mat, thick: +m[1], width: +m[2], length: +m[3], qty: 0, note: "", checked: true});
+    map.get(k).qty += x.qty;
+  });
+  const items = Array.from(map.values());
+  const m = openModal({
+    title: "信暐訂購單 ── 勾選要加入的採購項目", size: "lg",
+    bodyHTML: `<div class="sec" style="margin-bottom:10px"><h2>訂購資訊</h2><div class="body" style="grid-template-columns:auto 1fr auto 1fr auto 1fr">
+        <label class="lbl" for="od_name">工程名稱：</label><input id="od_name" value="${esc(p.proj_name || "")}">
+        <label class="lbl" for="od_no">工程編號：</label><input id="od_no" value="${esc(p.proj_no || "")}">
+        <label class="lbl" for="od_date">訂購日期：</label><input id="od_date" value="${today()}"></div></div>
+      <div class="toolbar"><button class="btn btn-slate btn-sm" data-a="all">全選</button><button class="btn btn-gray btn-sm" data-a="none">全不選</button><span class="grow"></span><span class="count" id="odCount"></span></div>
+      <div class="od-host" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>`,
+    footHTML: `<button class="btn btn-gray" data-a="cancel">❌ 取消</button><button class="btn btn-slate" data-a="preview">👁 預覽訂購單</button><span class="grow"></span><button class="btn btn-green" data-a="export">📥 信暐訂購單 Excel</button>`
+  });
+  if (window.matchMedia("(max-width:700px)").matches) $(".body", m.body).style.gridTemplateColumns = "auto 1fr";
+  const host = $(".od-host", m.body);
+  const render = () => {
+    host.innerHTML = gridHTML(["選取", "材質", "板厚(mm)", "板寬(mm)", "板長(mm)", "數量", "單片重(kg)", "總重(kg)", "備註"], items.map((it, i) => {
+      const wt = pyRound(calcWeight(it.width, it.thick, it.length, density), 0);
+      return {cls: it.checked ? "picked" : (i % 2 ? "even" : "odd"), attrs: `data-i="${i}"`,
+        cells: [{html: `<input type="checkbox" data-chk ${it.checked ? "checked" : ""} aria-label="選取">`}, it.mat, it.thick, it.width, it.length, it.qty,
+                Math.trunc(wt), Math.trunc(wt * it.qty), {html: `<input class="cellbox note" data-note value="${esc(it.note)}" aria-label="備註">`}]};
+    }));
+    $("#odCount", m.body).textContent = `已選 ${items.filter(it => it.checked).length} / ${items.length} 項`;
+  };
+  render();
+  host.addEventListener("change", e => {
+    const tr = e.target.closest("tr[data-i]"); if (!tr) return;
+    const it = items[+tr.dataset.i];
+    if (e.target.matches("[data-chk]")) { it.checked = e.target.checked; render(); }
+    if (e.target.matches("[data-note]")) it.note = e.target.value;
+  });
+  host.addEventListener("input", e => { if (e.target.matches("[data-note]")) items[+e.target.closest("tr").dataset.i].note = e.target.value; });
+  const info = () => ({name: $("#od_name", m.body).value, no: $("#od_no", m.body).value, date: $("#od_date", m.body).value});
+  m.el.addEventListener("click", async e => {
+    const a = e.target.closest("[data-a]")?.dataset.a; if (!a) return;
+    if (a === "all" || a === "none") { items.forEach(it => { it.checked = a === "all"; }); render(); return; }
+    if (a === "cancel") { m.close(); return; }
+    const sel = items.filter(it => it.checked);
+    if (!sel.length) { showWarn("提示", "請至少勾選一項。"); return; }
+    const f = info();
+    if (a === "preview") {
+      openModal({title: "訂購單預覽", size: "lg", bodyHTML: orderPreviewHTML(f.name, f.no, f.date, sel)});
+    }
+    if (a === "export") {
+      try {
+        const {blob, count, truncated} = await writeOrderXlsx(f.name, f.no, f.date, sel);
+        download(blob, `訂購單_${f.no}_${stampDate()}.xlsx`);
+        m.close();
+        if (truncated) showWarn("注意", `訂購單範本最多 19 列，共 ${count} 項，只填入前 19 項。`);
+        else showOk("完成", `訂購單已下載：訂購單_${f.no}_${stampDate()}.xlsx`);
+      } catch (err) { showError("失敗", err.message); }
+    }
+  });
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   按鈕動作
+   ═════════════════════════════════════════════════════════════════ */
+const ACTIONS = {
+  open: openSession,
+  save: () => saveSession(false),
+  saveAs: () => saveSession(true),
+  resetLimits: () => resetLimits(false),
+  bhAdd, scAdd,
+  bhDel: () => delSelected("bh", renderBh),
+  scDel: () => delSelected("sc", renderSc),
+  calc: runCalc, cancelCalc, clearAll,
+  importBh: importBhCsv, importSc: importScCsv,
+  blankBh: downloadBlankBh, blankSc: downloadBlankSc,
+  preview: () => { if (needResult()) openPreview(S.result); },
+  previewLayout: () => { if (needResult()) openLayoutPrint(S.result, `BH_排列圖_${stamp()}`, false); },
+  exportLayoutPdf: () => { if (needResult()) openLayoutPrint(S.result, `BH_排列圖_${stamp()}`, true); },
+  exportPdf: () => { if (needResult()) { openReportPrint(S.result, `BH_配料報表_${stamp()}`); setStatus("PDF 列印視窗已開啟（目的地選「另存為 PDF」）。"); } },
+  exportXlsx: () => { if (needResult()) exportXlsx(S.result, `BH_配料報表_${stamp()}.xlsx`); },
+  orderOrig: () => { if (needResult()) openOrderSelect(S.result); },
+  peOpen: openPurchaseEdit,
+  newPreview: () => { if (!needResult()) return; const r = getPeResult(); if (r) openPreview(r, "（新採購清單）"); },
+  newPreviewLayout: () => { if (!needResult()) return; const r = getPeResult(); if (r) openLayoutPrint(r, `BH_採購修正_排列圖_${stamp()}`, false); },
+  newExportLayout: () => { if (!needResult()) return; const r = getPeResult(); if (r) openLayoutPrint(r, `BH_採購修正_排列圖_${stamp()}`, true); },
+  newExportPdf: () => { if (!needResult()) return; const r = getPeResult(); if (r) openReportPrint(r, `BH_採購修正_${stamp()}`); },
+  newExportXlsx: () => { if (!needResult()) return; const r = getPeResult(); if (r) exportXlsx(r, `BH_採購修正_${stamp()}.xlsx`); },
+  orderNew: () => {
+    if (!needResult()) return;
+    const r = getPeResult(true);
+    if (!r) setStatus("尚未套用新採購清單，訂購單以原始配料結果建立。");
+    openOrderSelect(r || S.result);
+  },
+};
+
+document.addEventListener("click", e => {
+  const tab = e.target.closest(".tab"); if (tab) { switchTab(tab.dataset.tab); return; }
+  const b = e.target.closest("[data-act]");
+  if (b && ACTIONS[b.dataset.act]) ACTIONS[b.dataset.act]();
+});
+document.addEventListener("change", e => {
+  const sa = e.target.closest("[data-selall]"); if (!sa) return;
+  const key = sa.dataset.selall;
+  S[key].forEach(r => { r.sel = sa.checked; });
+  (key === "bh" ? renderBh : renderSc)();
+});
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && !modalStack.length) { e.preventDefault(); saveSession(false); }
+});
+window.addEventListener("beforeunload", e => {
+  autosave();
+  if (S.calc || (S.dirty && S.bh.length)) { e.preventDefault(); e.returnValue = ""; }
+});
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") autosave(); });
+
+/* ── 啟動 ── */
+initParams();
+wireEditGrid("#bhBody", "bh", BH_FIELDS, bhCellBad, renderBh, () => makeBhRow());
+wireEditGrid("#scBody", "sc", SC_FIELDS, scCellBad, renderSc, () => makeScRow());
+renderBh(); renderSc(); updateFileInd();
+setTimeout(askRestore, 300);
+</script>
+</body>
+</html>
