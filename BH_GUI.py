@@ -4161,6 +4161,37 @@ class PurchaseEditWindow(tk.Toplevel):
     def _limit_msgs(iss):
         return [m for m in (iss["width"], iss["length"], iss["wt"]) if m]
 
+    # 「忽略」超出採購限制：記住忽略當下的尺寸，之後再改尺寸會重新檢查
+    @staticmethod
+    def _lim_key(row):
+        return f'{row["width"]}x{row["length"]}'
+
+    def _is_ignored(self, row):
+        return row.get("lim_ignored") == self._lim_key(row)
+
+    def _ignore(self, row):
+        row["lim_ignored"] = self._lim_key(row)
+
+    def _active_limit_msgs(self, row):
+        """尚未忽略的超出項目"""
+        return [] if self._is_ignored(row) else self._limit_msgs(self._limit_issues(row))
+
+    def _target_rows(self):
+        """選取的列（未選取則為全部）"""
+        sel = [int(i) for i in self.tree.selection() if i.isdigit()]
+        return [self.rows[i] for i in sel] if sel else list(self.rows)
+
+    def _ignore_selected(self):
+        for row in self._target_rows():
+            if self._active_limit_msgs(row):
+                self._ignore(row)
+        self._refresh()
+
+    def _unignore_selected(self):
+        for row in self._target_rows():
+            row["lim_ignored"] = None
+        self._refresh()
+
     def _check_size(self, row, orig_spec):
         """檢查修改後板寬/板長是否足夠裁切零件，回傳 (ok, msg)"""
         import re
@@ -4304,6 +4335,9 @@ class PurchaseEditWindow(tk.Toplevel):
         self._lim_lbl = tk.Label(self, text="", bg=CLR_BG, fg="#C53030", justify="left",
                                  anchor="w", font=("Microsoft JhengHei", 9))
         self._lim_lbl.pack(fill="x", padx=10)
+        self._ign_lbl = tk.Label(self, text="", bg=CLR_BG, fg="#718096", justify="left",
+                                 anchor="w", font=("Microsoft JhengHei", 9))
+        self._ign_lbl.pack(fill="x", padx=10)
 
         btn_bar = tk.Frame(self, bg=CLR_BG)
         btn_bar.pack(fill="x", padx=10, pady=8)
@@ -4316,6 +4350,8 @@ class PurchaseEditWindow(tk.Toplevel):
 
         bb("↩ 重設",  self._reset,   "#718096", padx=(0,8))
         bb("🔍 診斷", self._debug,   "#4A6C7A", padx=(0,8))
+        bb("忽略超出限制", self._ignore_selected,   "#B7791F", padx=(0,4))
+        bb("取消忽略",     self._unignore_selected, "#A0AEC0", padx=(0,8))
         self._btn_confirm = tk.Button(btn_bar, text="✅ 完成",
                   command=self._confirm,
                   bg="#4A6741", fg="white", font=("Microsoft JhengHei", 10, "bold"),
@@ -4337,6 +4373,7 @@ class PurchaseEditWindow(tk.Toplevel):
         total_qty = 0
         has_error = False
         lims = []
+        ignored = []
         for i, row in enumerate(self.rows):
             wt  = self._wt(row)
             tot = wt * row["qty"]
@@ -4344,6 +4381,10 @@ class PurchaseEditWindow(tk.Toplevel):
             changed = (row["width"]  != row.get("orig_width",  row["width"]) or
                        row["length"] != row.get("orig_length", row["length"]))
             iss = self._limit_issues(row)
+            all_msgs = self._limit_msgs(iss)
+            if all_msgs and self._is_ignored(row):
+                ignored.append(f"• NO {i+1}　{self._spec(row)}：{'；'.join(all_msgs)}")
+                iss = {"width": "", "length": "", "wt": ""}   # 已忽略的項目不再標紅
             lim_msgs = self._limit_msgs(iss)
             if lim_msgs:
                 lims.append(f"• NO {i+1}　{self._spec(row)}：{'；'.join(lim_msgs)}")
@@ -4368,8 +4409,12 @@ class PurchaseEditWindow(tk.Toplevel):
                          values=("", "合計", "", "", total_qty, "",
                                  "總重(kg)：", f"{total_wt:,.0f}", "", ""))
         if hasattr(self, "_lim_lbl"):
-            self._lim_lbl.config(text=("⚠ 以下項目超出採購限制（紅字 ⚠），請確認是否可採購：\n"
-                                       + "\n".join(lims)) if lims else "")
+            txt = ""
+            if lims:
+                txt += ("⚠ 以下項目超出採購限制（紅字 ⚠），請確認是否可採購"
+                        "（可選取列後按「忽略超出限制」；未選取則全部忽略）：\n" + "\n".join(lims))
+            self._lim_lbl.config(text=txt)
+            self._ign_lbl.config(text=("已忽略的超出採購限制：\n" + "\n".join(ignored)) if ignored else "")
         if hasattr(self, "_btn_confirm"):
             if has_error:
                 self._btn_confirm.config(state="disabled", bg="#AAAAAA",
@@ -4405,16 +4450,19 @@ class PurchaseEditWindow(tk.Toplevel):
         row[key] = val
         self._refresh()
         ok, msg = self._check_size(row, row["orig_spec"])
-        lim_msgs = self._limit_msgs(self._limit_issues(row))
+        lim_msgs = self._active_limit_msgs(row)
         if not ok:
             row[key] = val  # 保留修改但警告
             extra = ("\n\n另外超出採購限制：\n" + "\n".join(lim_msgs)) if lim_msgs else ""
             messagebox.showwarning("尺寸不足",
                 f"⚠ 鐵板片數不足，無法裁切！\n\n{msg}\n\n請調大板寬或板長。{extra}", parent=self)
         elif lim_msgs:
-            messagebox.showwarning("超出採購限制",
-                f"⚠ {self._spec(row)} 超出採購限制：\n\n" + "\n".join(lim_msgs)
-                + "\n\n請確認此規格是否可採購。", parent=self)
+            if messagebox.askyesno("超出採購限制",
+                    f"⚠ {self._spec(row)} 超出採購限制：\n\n" + "\n".join(lim_msgs)
+                    + "\n\n若確認此規格可採購，是否忽略並繼續？\n（選「否」返回修改）",
+                    icon="warning", parent=self):
+                self._ignore(row)
+                self._refresh()
 
     def _debug(self):
         import re
@@ -4491,15 +4539,22 @@ class PurchaseEditWindow(tk.Toplevel):
                 f"以下項目尺寸不足（紅色底色），無法裁切：\n\n{err_txt}\n\n請調大板寬或板長後再完成。",
                 parent=self)
             return
-        lims = []
+        lims, lim_rows = [], []
         for row in self.rows:
-            ms = self._limit_msgs(self._limit_issues(row))
+            ms = self._active_limit_msgs(row)
             if ms:
+                lim_rows.append(row)
                 lims.append(f"• {self._spec(row)}：{'；'.join(ms)}")
-        if lims and not messagebox.askyesno(
-                "超出採購限制",
-                "以下項目超出採購限制：\n\n" + "\n".join(lims) + "\n\n確定仍要套用？", parent=self):
-            return
+        if lims:
+            if not messagebox.askyesno(
+                    "超出採購限制",
+                    "以下項目超出採購限制：\n\n" + "\n".join(lims)
+                    + "\n\n若確認可採購，是否全部忽略並套用？\n（選「否」返回修改）",
+                    icon="warning", parent=self):
+                return
+            for row in lim_rows:
+                self._ignore(row)
+            self._refresh()
         self.parent._purchase_edit_result = self._make_modified_result()
         messagebox.showinfo("完成", "新採購清單已套用！\n可點擊「新預覽」查看結果。", parent=self)
         self.destroy()

@@ -116,6 +116,8 @@ table.grid{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px
 .grid input.cellbox.note{width:170px;text-align:left}
 .grid input.cellbox.over{color:#C53030;font-weight:700;border-color:#C53030;background:#FFF5F5}
 .grid .over-txt{color:#C53030;font-weight:700}
+.pe-lim-row{display:flex;align-items:center;gap:8px;min-height:26px} .pe-lim-row .btn{padding:1px 10px}
+.pe-lim-ign,.pe-lim-ign .pe-lim-row{color:#718096}
 .empty{padding:40px 16px;text-align:center;color:var(--muted)}
 .empty b{color:var(--ink)}
 
@@ -2212,6 +2214,14 @@ function peLimitIssues(r, row) {
           wt: chk("單片重", wt, w_min, w_max, "kg")};
 }
 const peLimitMsgs = iss => [iss.width, iss.length, iss.wt].filter(Boolean);
+/* 「忽略」超出採購限制：記住忽略當下的尺寸，之後再改尺寸會重新檢查 */
+const peLimKey = row => `${row.width}x${row.length}`;
+const peIgnored = row => row.lim_ignored === peLimKey(row);
+const peIgnore = row => { row.lim_ignored = peLimKey(row); };
+/* 尚未忽略的超出項目 */
+const peActiveLimitMsgs = (r, row) => peIgnored(row) ? [] : peLimitMsgs(peLimitIssues(r, row));
+const askIgnoreLimit = (title, text, okLabel) => dialog({title, text, kind: "warn",
+  buttons: [{label: "返回修改", value: false}, {label: okLabel, value: true, cls: "btn-primary"}]});
 function checkSize(r, row, orig_spec) {
   const kerf = r.params.new_kerf, trim = r.params.new_trim, cur_w = row.width, cur_l = row.length;
   const mo = specRe.exec(orig_spec);
@@ -2329,14 +2339,17 @@ function openPurchaseEdit() {
   });
   const host = $(".pe-host", m.body), errBox = $(".pe-err", m.body), limBox = $(".pe-lim", m.body);
   const refresh = () => {
-    const rows = S.peRows; let tw = 0, tq = 0, hasErr = false; const errs = [], lims = [];
+    const rows = S.peRows; let tw = 0, tq = 0, hasErr = false; const errs = [], lims = [], ignored = [];
     const html = rows.map((row, i) => {
       const wt = peWt(r, row), tot = wt * row.qty;
       const [ok, msg] = checkSize(r, row, row.orig_spec);
       const changed = row.width !== row.orig_width || row.length !== row.orig_length;
-      const iss = peLimitIssues(r, row), limMsgs = peLimitMsgs(iss);
+      const allMsgs = peLimitMsgs(peLimitIssues(r, row)), ign = allMsgs.length > 0 && peIgnored(row);
+      // 已忽略的項目不再標紅
+      const iss = ign ? {width: "", length: "", wt: ""} : peLimitIssues(r, row), limMsgs = peLimitMsgs(iss);
       if (!ok) { hasErr = true; errs.push(`• NO ${i + 1}　${peSpec(row)}：${msg}`); }
-      if (limMsgs.length) lims.push(`• NO ${i + 1}　${peSpec(row)}：${limMsgs.join("；")}`);
+      if (limMsgs.length) lims.push({i, text: `• NO ${i + 1}　${peSpec(row)}：${limMsgs.join("；")}`});
+      if (ign) ignored.push({i, text: `• NO ${i + 1}　${peSpec(row)}：${allMsgs.join("；")}`});
       tw += tot; tq += row.qty;
       const tip = [!ok ? msg : "", ...limMsgs].filter(Boolean).join("\n");
       const box = (k, label) => `<input class="cellbox${iss[k] ? " over" : ""}" ${iss[k] ? `title="${esc(iss[k])}"` : ""} data-k="${k}" value="${row[k]}" inputmode="numeric" aria-label="${label}">`;
@@ -2350,11 +2363,16 @@ function openPurchaseEdit() {
     html.push({cls: "tot", cells: ["", "合計", "", "", tq, "", "總重(kg)：", fmtInt(tw), "", ""]});
     host.innerHTML = gridHTML(["NO", "板厚(mm)", "板寬(mm)", "板長(mm)", "數量", "材質", "單片重(kg)", "總重(kg)", "備註", "原始規格"], html);
     errBox.textContent = hasErr ? "⚠ 以下項目尺寸不足（紅色底色），無法裁切：\n" + errs.join("\n") : "";
-    limBox.textContent = lims.length ? "⚠ 以下項目超出採購限制（紅字），請確認是否可採購：\n" + lims.join("\n") : "";
+    const limLine = (x, btn) => `<div class="pe-lim-row">${esc(x.text)}${btn}</div>`;
+    limBox.innerHTML =
+      (lims.length ? `<div class="pe-lim-row"><b>⚠ 以下項目超出採購限制（紅字），請確認是否可採購：</b>${lims.length > 1 ? `<button class="btn btn-ghost btn-sm" data-ign="all">全部忽略</button>` : ""}</div>` +
+        lims.map(x => limLine(x, `<button class="btn btn-ghost btn-sm" data-ign="${x.i}">忽略</button>`)).join("") : "") +
+      (ignored.length ? `<div class="pe-lim-row pe-lim-ign"><b>已忽略的超出採購限制：</b></div>` +
+        ignored.map(x => `<div class="pe-lim-ign">${limLine(x, `<button class="btn btn-ghost btn-sm" data-unign="${x.i}">取消忽略</button>`)}</div>`).join("") : "");
     const btn = $("[data-a=confirm]", m.foot);
     btn.disabled = hasErr; btn.textContent = hasErr ? "✅ 完成（有錯誤）" : "✅ 完成";
   };
-  host.addEventListener("change", e => {
+  host.addEventListener("change", async e => {
     const inp = e.target.closest("input[data-k]"); if (!inp) return;
     const i = +inp.closest("tr").dataset.i, row = S.peRows[i], k = inp.dataset.k;
     if (k === "note") { row.note = inp.value; return; }
@@ -2363,10 +2381,21 @@ function openPurchaseEdit() {
     catch (err) { showWarn("輸入錯誤", `請輸入 1 ~ 99999 之間的整數（mm）。`); inp.value = row[k]; return; }
     row[k] = v; refresh();
     const [ok, msg] = checkSize(r, row, row.orig_spec);
-    const limMsgs = peLimitMsgs(peLimitIssues(r, row));
+    const limMsgs = peActiveLimitMsgs(r, row);
     if (!ok) showWarn("尺寸不足", `⚠ 鐵板片數不足，無法裁切！\n\n${msg}\n\n請調大板寬或板長。` +
                       (limMsgs.length ? `\n\n另外超出採購限制：\n${limMsgs.join("\n")}` : ""));
-    else if (limMsgs.length) showWarn("超出採購限制", `⚠ ${peSpec(row)} 超出採購限制：\n\n${limMsgs.join("\n")}\n\n請確認此規格是否可採購。`);
+    else if (limMsgs.length && await askIgnoreLimit("超出採購限制",
+        `⚠ ${peSpec(row)} 超出採購限制：\n\n${limMsgs.join("\n")}\n\n若確認此規格可採購，可按「忽略並繼續」。`, "忽略並繼續")) {
+      peIgnore(row); refresh();
+    }
+  });
+  // 超出採購限制：忽略 / 取消忽略
+  limBox.addEventListener("click", e => {
+    const b = e.target.closest("button[data-ign],button[data-unign]"); if (!b) return;
+    if (b.dataset.ign === "all") S.peRows.forEach(row => { if (peActiveLimitMsgs(r, row).length) peIgnore(row); });
+    else if (b.dataset.ign !== undefined) peIgnore(S.peRows[+b.dataset.ign]);
+    else S.peRows[+b.dataset.unign].lim_ignored = null;
+    refresh();
   });
   host.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("input[data-k]")) e.target.blur(); });
   m.foot.addEventListener("click", async e => {
@@ -2390,9 +2419,12 @@ function openPurchaseEdit() {
       const errors = [];
       S.peRows.forEach(row => { const [ok, msg] = checkSize(r, row, row.orig_spec); if (!ok) errors.push(`• PL${row.thick}×${row.width}×${row.length}：${msg}`); });
       if (errors.length) { showError("無法完成 — 尺寸不足", `以下項目尺寸不足（紅色底色），無法裁切：\n\n${errors.join("\n")}\n\n請調大板寬或板長後再完成。`); return; }
-      const lims = [];
-      S.peRows.forEach(row => { const ms = peLimitMsgs(peLimitIssues(r, row)); if (ms.length) lims.push(`• ${peSpec(row)}：${ms.join("；")}`); });
-      if (lims.length && !await askYesNo("超出採購限制", `以下項目超出採購限制：\n\n${lims.join("\n")}\n\n確定仍要套用？`)) return;
+      const lims = [], limRows = [];
+      S.peRows.forEach(row => { const ms = peActiveLimitMsgs(r, row); if (ms.length) { limRows.push(row); lims.push(`• ${peSpec(row)}：${ms.join("；")}`); } });
+      if (lims.length) {
+        if (!await askIgnoreLimit("超出採購限制", `以下項目超出採購限制：\n\n${lims.join("\n")}\n\n若確認可採購，可按「全部忽略並套用」。`, "全部忽略並套用")) return;
+        limRows.forEach(peIgnore); refresh();
+      }
       S.peResult = makeModifiedResult(r, S.peRows);
       m.close();
       showOk("完成", "新採購清單已套用！\n可點擊「新預覽」查看結果。");
