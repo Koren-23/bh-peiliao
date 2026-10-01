@@ -64,15 +64,16 @@ button{font-family:inherit}
 .statusbar .prog i{display:block;height:100%;width:0;background:var(--primary);transition:width .15s}
 .actionbar{display:flex;gap:8px;padding:10px 12px;align-items:center;flex-wrap:wrap;background:var(--bg)}
 
-/* ── side bars ── */
-.side{width:138px;flex:0 0 138px;overflow-y:auto;padding:8px 8px 14px;display:flex;flex-direction:column;gap:4px}
-.side-a{background:var(--violet-bar)}
-.side-b{background:var(--orange-bar)}
-.side h3{margin:8px 0 2px;font-size:12.5px;color:#FBD38D;text-align:center;letter-spacing:1px}
-.side .sep{height:1px;background:rgba(255,255,255,.28);margin:6px 2px}
-.side .btn{width:100%;justify-content:center;padding:9px 6px;font-size:13.5px}
+/* ── side bars：兩欄格線，左欄（紫）配料結果、右欄（橘）採購修正，各列左右對齊 ── */
+.sides{flex:0 0 276px;display:grid;grid-template-columns:138px 138px;grid-template-rows:auto auto auto auto 1fr;overflow-y:auto}
+.sides .cell{display:flex;flex-direction:column;gap:4px;padding:6px 8px}
+.sides .cell.a{background:var(--violet-bar)} .sides .cell.b{background:var(--orange-bar)}
+.sides .cell.row{border-top:1px solid rgba(255,255,255,.28);padding-top:8px}
+.sides .cell.fill{padding:0}
+.sides h3{margin:6px 0 2px;font-size:12.5px;color:#FBD38D;text-align:center;letter-spacing:1px}
+.sides .btn{width:100%;justify-content:center;padding:9px 6px;font-size:13.5px}
 .side-title{color:#fff;font-weight:700;text-align:center;font-size:13px;padding:4px 0 2px;border-bottom:1px solid rgba(255,255,255,.3);margin-bottom:2px}
-
+.side-title.ghost{visibility:hidden}
 /* ── param form ── */
 .sections{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px;align-items:start;max-width:1200px}
 .sec{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
@@ -167,11 +168,8 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
   body{height:auto}
   .app-main{flex-direction:column}
   .workspace{min-height:70vh}
-  .side{width:auto;flex:none;flex-direction:row;flex-wrap:wrap;padding:10px 12px}
-  .side h3{width:100%;text-align:left;margin:6px 0 0}
-  .side .sep{display:none}
-  .side .btn{width:auto;flex:1 1 130px}
-  .side-title{width:100%;text-align:left}
+  .sides{flex:none;grid-template-columns:1fr 1fr;grid-template-rows:none;overflow:visible}
+  .sides .cell.fill{display:none}
 }
 @media (max-width: 560px){
   .app-hdr{padding:8px 12px}
@@ -278,40 +276,55 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
     </div>
   </section>
 
-  <aside class="side side-a" aria-label="原始配料結果">
-    <div class="side-title">配料結果</div>
-    <h3>匯入</h3>
-    <button class="btn btn-slate" data-act="importBh">📂 配料CSV</button>
-    <button class="btn btn-slate" data-act="importSc">📂 餘料CSV</button>
-    <div class="sep"></div>
-    <h3>匯出</h3>
-    <button class="btn btn-violet" data-act="exportLayoutPdf">🗂 排列圖PDF</button>
-    <button class="btn btn-violet" data-act="exportPdf">🖨 匯出 PDF</button>
-    <button class="btn btn-violet" data-act="exportXlsx">💾 匯出Excel</button>
-    <button class="btn btn-violet" data-act="orderOrig">📝 信暐訂購單</button>
-    <div class="sep"></div>
-    <h3>預覽</h3>
-    <button class="btn btn-teal" data-act="preview">🔍 配料結果</button>
-    <button class="btn btn-teal" data-act="previewLayout">📐 排列圖</button>
-    <div class="sep"></div>
-    <h3>空白表單</h3>
-    <button class="btn btn-brown" data-act="blankBh">📄 空白配料表</button>
-    <button class="btn btn-brown" data-act="blankSc">📄 空白餘料表</button>
-  </aside>
-
-  <aside class="side side-b" aria-label="採購修正">
-    <div class="side-title">採購修正</div>
-    <button class="btn btn-rose" data-act="peOpen">📋 新採購清單</button>
-    <div class="sep"></div>
-    <h3>匯出</h3>
-    <button class="btn btn-brown" data-act="newExportLayout">🗂 排列圖PDF</button>
-    <button class="btn btn-rust" data-act="newExportPdf">🖨 匯出PDF</button>
-    <button class="btn btn-green" data-act="newExportXlsx">💾 匯出Excel</button>
-    <button class="btn btn-rose" data-act="orderNew">📝 信暐訂購單</button>
-    <div class="sep"></div>
-    <h3>新預覽</h3>
-    <button class="btn btn-rose" data-act="newPreview">🔍 配料結果</button>
-    <button class="btn btn-rose" data-act="newPreviewLayout">🗂 排列圖</button>
+  <aside class="sides" aria-label="配料結果與採購修正">
+    <!-- 第 1 列：匯入 ／ 採購修正 -->
+    <div class="cell a">
+      <h3>匯入</h3>
+      <button class="btn btn-slate" data-act="importBh">📂 配料CSV</button>
+      <button class="btn btn-slate" data-act="importSc">📂 餘料CSV</button>
+    </div>
+    <div class="cell b">
+      <div class="side-title">採購修正</div>
+      <button class="btn btn-rose" data-act="peOpen">📋 新採購清單</button>
+    </div>
+    <!-- 第 2 列：匯出（左欄上方為「配料結果」標題，右欄放同高的隱藏標題以對齊） -->
+    <div class="cell a row">
+      <div class="side-title">配料結果</div>
+      <h3>匯出</h3>
+      <button class="btn btn-violet" data-act="exportLayoutPdf">🗂 排列圖PDF</button>
+      <button class="btn btn-violet" data-act="exportPdf">🖨 匯出 PDF</button>
+      <button class="btn btn-violet" data-act="exportXlsx">💾 匯出Excel</button>
+      <button class="btn btn-violet" data-act="orderOrig">📝 信暐訂購單</button>
+    </div>
+    <div class="cell b row">
+      <div class="side-title ghost" aria-hidden="true">配料結果</div>
+      <h3>匯出</h3>
+      <button class="btn btn-brown" data-act="newExportLayout">🗂 排列圖PDF</button>
+      <button class="btn btn-rust" data-act="newExportPdf">🖨 匯出PDF</button>
+      <button class="btn btn-green" data-act="newExportXlsx">💾 匯出Excel</button>
+      <button class="btn btn-rose" data-act="orderNew">📝 信暐訂購單</button>
+    </div>
+    <!-- 第 3 列：預覽 ／ 新預覽 -->
+    <div class="cell a row">
+      <h3>預覽</h3>
+      <button class="btn btn-teal" data-act="preview">🔍 配料結果</button>
+      <button class="btn btn-teal" data-act="previewLayout">📐 排列圖</button>
+    </div>
+    <div class="cell b row">
+      <h3>新預覽</h3>
+      <button class="btn btn-rose" data-act="newPreview">🔍 配料結果</button>
+      <button class="btn btn-rose" data-act="newPreviewLayout">🗂 排列圖</button>
+    </div>
+    <!-- 第 4 列：空白表單 -->
+    <div class="cell a row">
+      <h3>空白表單</h3>
+      <button class="btn btn-brown" data-act="blankBh">📄 空白配料表</button>
+      <button class="btn btn-brown" data-act="blankSc">📄 空白餘料表</button>
+    </div>
+    <div class="cell b row"></div>
+    <!-- 填滿剩餘高度 -->
+    <div class="cell a fill"></div>
+    <div class="cell b fill"></div>
   </aside>
 </div>
 

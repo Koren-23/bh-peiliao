@@ -2532,128 +2532,90 @@ class BHPeilianApp(tk.Tk):
         # 確保即使分頁內容很高，這兩排也一定保留可見空間，
         # 不會被中間的 Notebook（expand=True）擠出畫面外。
 
-        # 採購修正欄（橘色）
-        edit_bar = tk.Frame(self, bg="#CD853F", width=110)
-        edit_bar.pack(side="right", fill="y")
-        edit_bar.pack_propagate(False)
+        # 右側兩欄（左：紫色「配料結果」、右：橘色「採購修正」），用 grid 讓各列左右對齊：
+        #   第 0 列：匯入        ／ 採購修正（新採購清單）
+        #   第 1 列：配料結果＋匯出 ／ 匯出（含信暐訂購單）
+        #   第 2 列：預覽        ／ 新預覽
+        #   第 3 列：空白表單    ／ （空白）
+        #   第 4 列：填滿剩餘高度
+        VIOLET, ORANGE = "#6B5B95", "#CD853F"
+        side = tk.Frame(self, bg=VIOLET)
+        side.pack(side="right", fill="y")
+        for c in (0, 1):
+            side.grid_columnconfigure(c, minsize=110, uniform="side")
+        side.grid_rowconfigure(4, weight=1)
 
-        def edit_btn(text, cmd):
-            tk.Button(edit_bar, text=text, command=cmd,
-                      bg="#C06080", fg="white", activebackground="#9C4060",
-                      font=("Microsoft JhengHei", 10, "bold"),
-                      relief="flat", cursor="hand2",
-                      width=10, pady=8
-                      ).pack(fill="x", padx=8, pady=4)
+        def cell(row, col):
+            bg = VIOLET if col == 0 else ORANGE
+            f = tk.Frame(side, bg=bg)
+            f.grid(row=row, column=col, sticky="nsew")
+            if 0 < row < 4:   # 列與列之間的分隔線
+                tk.Frame(f, bg="#6B46C1" if col == 0 else "#E8935A", height=1).pack(fill="x", padx=8, pady=(8, 4))
+            return f
 
-        tk.Label(edit_bar, text="採購修正", bg="#CD853F", fg="#FBD38D",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(10,4))
+        def title(f, text, ghost=False):
+            """欄標題（白字）；ghost=True 時文字與底色同色，只佔位以對齊另一欄"""
+            bg = f.cget("bg")
+            tk.Label(f, text=text, bg=bg, fg=bg if ghost else "white",
+                     font=("Microsoft JhengHei", 9, "bold")).pack(pady=(6, 0))
 
-        edit_btn("📋 新採購清單", self._open_purchase_edit)
+        def head(f, text):
+            tk.Label(f, text=text, bg=f.cget("bg"), fg="#FBD38D",
+                     font=("Microsoft JhengHei", 9, "bold")).pack(pady=(6, 4))
 
-        tk.Frame(edit_bar, bg="#E8935A", height=1).pack(fill="x", padx=8, pady=(8,4))
-
-        tk.Label(edit_bar, text="匯出", bg="#CD853F", fg="#FBD38D",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
-
-        def edit_exp_btn(text, cmd, bg, abg):
-            tk.Button(edit_bar, text=text, command=cmd,
+        def btn(f, text, cmd, bg, abg):
+            tk.Button(f, text=text, command=cmd,
                       bg=bg, fg="white", activebackground=abg,
                       font=("Microsoft JhengHei", 10, "bold"),
                       relief="flat", cursor="hand2",
                       width=10, pady=8
                       ).pack(fill="x", padx=8, pady=4)
 
-        edit_exp_btn("🗂 排列圖PDF", self._new_export_layout, "#8C6D3F", "#6B5230")
-        edit_exp_btn("🖨 匯出PDF",   self._new_export_pdf,    "#744210", "#5A3200")
-        edit_exp_btn("💾 匯出Excel", self._new_export_xlsx,   "#4A6741", "#3A5232")
-        edit_btn("📝 信暐訂購單", self._open_order_select)
+        # 第 0 列：匯入 ／ 採購修正
+        f = cell(0, 0)
+        head(f, "匯入")
+        btn(f, "📂 配料CSV", self._import_csv,    "#4A6C7A", "#652B16")
+        btn(f, "📂 餘料CSV", self._sc_import_csv, "#4A6C7A", "#652B16")
+        f = cell(0, 1)
+        head(f, "採購修正")
+        btn(f, "📋 新採購清單", self._open_purchase_edit, "#C06080", "#9C4060")
 
-        tk.Frame(edit_bar, bg="#E8935A", height=1).pack(fill="x", padx=8, pady=(8,4))
+        # 第 1 列：匯出（左欄上方為「配料結果」標題，右欄放同高的隱藏標題以對齊）
+        f = cell(1, 0)
+        title(f, "配料結果")
+        head(f, "匯出")
+        btn(f, "🗂 排列圖PDF", self._export_layout_pdf,   "#6B46C1", "#553098")
+        btn(f, "🖨 匯出 PDF",  self._export_pdf,          "#6B46C1", "#553098")
+        btn(f, "💾 匯出Excel", self._export_xlsx,         "#6B46C1", "#553098")
+        btn(f, "📝 信暐訂購單", self._open_order_original, "#6B46C1", "#553098")
+        f = cell(1, 1)
+        title(f, "配料結果", ghost=True)
+        head(f, "匯出")
+        btn(f, "🗂 排列圖PDF", self._new_export_layout, "#8C6D3F", "#6B5230")
+        btn(f, "🖨 匯出PDF",   self._new_export_pdf,    "#744210", "#5A3200")
+        btn(f, "💾 匯出Excel", self._new_export_xlsx,   "#4A6741", "#3A5232")
+        btn(f, "📝 信暐訂購單", self._open_order_select, "#C06080", "#9C4060")
 
-        tk.Label(edit_bar, text="新預覽", bg="#CD853F", fg="#FBD38D",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
+        # 第 2 列：預覽 ／ 新預覽
+        f = cell(2, 0)
+        head(f, "預覽")
+        btn(f, "🔍 配料結果", self._preview,        "#3D6B6B", "#235F60")
+        btn(f, "📐 排列圖",   self._preview_layout, "#3D6B6B", "#235F60")
+        f = cell(2, 1)
+        head(f, "新預覽")
+        btn(f, "🔍 配料結果", self._new_preview_result, "#C06080", "#9C4060")
+        btn(f, "🗂 排列圖",   self._new_preview_layout, "#C06080", "#9C4060")
 
-        edit_btn("🔍 配料結果", self._new_preview_result)
-        edit_btn("🗂 排列圖",   self._new_preview_layout)
+        # 第 3 列：空白表單
+        f = cell(3, 0)
+        head(f, "空白表單")
+        btn(f, "📄 空白配料表", self._download_blank_csv, "#8C6D3F", "#9C4221")
+        btn(f, "📄 空白餘料表", self._sc_download_blank,  "#8C6D3F", "#9C4221")
+        cell(3, 1)
 
-        # 紫色右側欄（匯入/匯出/預覽/空白表單）
-        export_bar = tk.Frame(self, bg="#6B5B95", width=110)
-        export_bar.pack(side="right", fill="y", padx=(0,0), pady=0)
-        export_bar.pack_propagate(False)
-
-        # 匯入區塊
-        tk.Label(export_bar, text="匯入", bg="#6B5B95", fg="#FBD38D",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(10,4))
-
-        def import_btn(text, cmd):
-            tk.Button(export_bar, text=text, command=cmd,
-                      bg="#4A6C7A", fg="white", activebackground="#652B16",
-                      font=("Microsoft JhengHei", 10, "bold"),
-                      relief="flat", cursor="hand2",
-                      width=10, pady=8
-                      ).pack(fill="x", padx=8, pady=4)
-
-        import_btn("📂 配料CSV",  self._import_csv)
-        import_btn("📂 餘料CSV",  self._sc_import_csv)
-
-        # 分隔線
-        tk.Frame(export_bar, bg="#6B46C1", height=1).pack(fill="x", padx=8, pady=(8,4))
-
-        # 匯出區塊
-        tk.Label(export_bar, text="匯出", bg="#6B5B95", fg="white",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(10,4))
-
-        def exp_btn(text, cmd):
-            tk.Button(export_bar, text=text, command=cmd,
-                      bg="#6B46C1", fg="white", activebackground="#553098",
-                      font=("Microsoft JhengHei", 10, "bold"),
-                      relief="flat", cursor="hand2",
-                      width=10, pady=8
-                      ).pack(fill="x", padx=8, pady=4)
-
-        exp_btn("🗂 排列圖PDF", self._export_layout_pdf)
-        exp_btn("🖨 匯出 PDF",  self._export_pdf)
-        exp_btn("💾 匯出Excel", self._export_xlsx)
-        exp_btn("📝 信暐訂購單", self._open_order_original)
-
-        # 分隔線
-        tk.Frame(export_bar, bg="#6B46C1", height=1).pack(fill="x", padx=8, pady=(8,4))
-
-        # 預覽區塊
-        tk.Label(export_bar, text="預覽", bg="#6B5B95", fg="#FBD38D",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
-
-        def preview_btn(text, cmd):
-            tk.Button(export_bar, text=text, command=cmd,
-                      bg="#3D6B6B", fg="white", activebackground="#235F60",
-                      font=("Microsoft JhengHei", 10, "bold"),
-                      relief="flat", cursor="hand2",
-                      width=10, pady=8
-                      ).pack(fill="x", padx=8, pady=4)
-
-        preview_btn("🔍 配料結果", self._preview)
-        preview_btn("📐 排列圖",   self._preview_layout)
-
-        # 分隔線
-        tk.Frame(export_bar, bg="#6B46C1", height=1).pack(fill="x", padx=8, pady=(8,4))
-
-        # 空白表單區塊
-        tk.Label(export_bar, text="空白表單", bg="#6B5B95", fg="#FBD38D",
-                 font=("Microsoft JhengHei", 9, "bold")).pack(pady=(2,4))
-
-        def blank_btn(text, cmd):
-            tk.Button(export_bar, text=text, command=cmd,
-                      bg="#8C6D3F", fg="white", activebackground="#9C4221",
-                      font=("Microsoft JhengHei", 10, "bold"),
-                      relief="flat", cursor="hand2",
-                      width=10, pady=8
-                      ).pack(fill="x", padx=8, pady=4)
-
-        blank_btn("📄 空白配料表", self._download_blank_csv)
-        blank_btn("📄 空白餘料表", self._sc_download_blank)
-
-        # 清除全部放在匯出欄最底部
-        tk.Frame(export_bar, bg="#6B5B95").pack(fill="both", expand=True)
+        # 第 4 列：填滿剩餘高度
+        cell(4, 0)
+        cell(4, 1)
 
         # 底部按鈕列（固定底部，最先保留空間）
         btn_bar = tk.Frame(self, bg=CLR_BG)
