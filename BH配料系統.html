@@ -10,7 +10,7 @@
   --bg:#F0F4F8; --surface:#FFFFFF; --ink:#1A202C; --muted:#718096; --line:#CBD5E0;
   --navy:#1A3050; --navy2:#1E3A5F; --sky:#90CDF4;
   --primary:#2B6CB0; --danger:#7A3535; --green:#4A6741; --teal:#3D6B6B; --slate:#4A6C7A;
-  --violet:#6B46C1; --violet-bar:#6B5B95; --brown:#8C6D3F; --rust:#744210; --rose:#C06080; --orange-bar:#F2D7B6; --calm:#5B7A99;
+  --violet:#6B46C1; --violet-bar:#E4DFF1; --brown:#8C6D3F; --rust:#744210; --rose:#C06080; --orange-bar:#F4E1C9; --calm:#5B7A99;
   --row-odd:#F7FAFC; --row-even:#EBF4FF; --row-comp:#D6EAF8; --row-scrap:#D4EDDA; --row-unused:#FFF3CD;
   --row-error:#FED7D7; --row-changed:#C6EFCE; --row-sel:#BEE3F8;
   --font:"Microsoft JhengHei","微軟正黑體","PingFang TC","Noto Sans TC",system-ui,sans-serif;
@@ -74,7 +74,13 @@ button{font-family:inherit}
 .sides .btn{width:100%;justify-content:center;padding:9px 6px;font-size:13.5px}
 .side-title{color:#fff;font-weight:700;text-align:center;font-size:13px;padding:4px 0 2px;border-bottom:1px solid rgba(255,255,255,.3);margin-bottom:2px}
 .side-title.ghost{visibility:hidden}
-/* 採購修正欄：淺色底，標題改深色 */
+/* 側欄按鈕配色：柔和低飽和，同功能左右呼應 */
+.sb-imp{--c:#5A7184} .sb-pe{--c:#A65C72} .sb-exp{--c:#7B68B5} .sb-exp2{--c:#96603A}
+.sb-pv{--c:#44797A} .sb-pv2{--c:#5B7A99} .sb-blank{--c:#8A6A42}
+.sides .btn{box-shadow:0 1px 2px rgba(0,0,0,.12)}
+/* 兩欄皆為淺色底，標題改深色 */
+.sides .cell.a h3{color:#5B3F8C} .sides .cell.a .side-title{color:#3B2A6B;border-bottom-color:rgba(59,42,107,.3)}
+.sides .cell.a.row{border-top-color:rgba(59,42,107,.2)}
 .sides .cell.b h3{color:#7B4A1E} .sides .cell.b .side-title{color:#5A3510;border-bottom-color:rgba(90,53,16,.3)}
 .sides .cell.b.row{border-top-color:rgba(90,53,16,.2)}
 /* ── param form ── */
@@ -283,46 +289,46 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
     <!-- 第 1 列：匯入 ／ 採購修正 -->
     <div class="cell a">
       <h3>匯入</h3>
-      <button class="btn btn-slate" data-act="importBh">📂 配料CSV</button>
-      <button class="btn btn-slate" data-act="importSc">📂 餘料CSV</button>
+      <button class="btn sb-imp" data-act="importBh">📂 配料CSV</button>
+      <button class="btn sb-imp" data-act="importSc">📂 餘料CSV</button>
     </div>
     <div class="cell b">
       <div class="side-title">採購修正</div>
-      <button class="btn btn-rose" data-act="peOpen">📋 新採購清單</button>
+      <button class="btn sb-pe" data-act="peOpen">📋 新採購清單</button>
     </div>
     <!-- 第 2 列：匯出（左欄上方為「配料結果」標題，右欄放同高的隱藏標題以對齊） -->
     <div class="cell a row">
       <div class="side-title">配料結果</div>
       <h3>匯出</h3>
-      <button class="btn btn-violet" data-act="exportLayoutPdf">🗂 排列圖PDF</button>
-      <button class="btn btn-violet" data-act="exportPdf">🖨 匯出 PDF</button>
-      <button class="btn btn-violet" data-act="exportXlsx">💾 匯出Excel</button>
-      <button class="btn btn-violet" data-act="orderOrig">📝 信暐訂購單</button>
+      <button class="btn sb-exp" data-act="exportLayoutPdf">🗂 排列圖PDF</button>
+      <button class="btn sb-exp" data-act="exportPdf">🖨 匯出 PDF</button>
+      <button class="btn sb-exp" data-act="exportXlsx">💾 匯出Excel</button>
+      <button class="btn sb-exp" data-act="orderOrig">📝 信暐訂購單</button>
     </div>
     <div class="cell b row">
       <div class="side-title ghost" aria-hidden="true">配料結果</div>
       <h3>匯出</h3>
-      <button class="btn btn-rust" data-act="newExportLayout">🗂 排列圖PDF</button>
-      <button class="btn btn-rust" data-act="newExportPdf">🖨 匯出PDF</button>
-      <button class="btn btn-rust" data-act="newExportXlsx">💾 匯出Excel</button>
-      <button class="btn btn-rust" data-act="orderNew">📝 信暐訂購單</button>
+      <button class="btn sb-exp2" data-act="newExportLayout">🗂 排列圖PDF</button>
+      <button class="btn sb-exp2" data-act="newExportPdf">🖨 匯出PDF</button>
+      <button class="btn sb-exp2" data-act="newExportXlsx">💾 匯出Excel</button>
+      <button class="btn sb-exp2" data-act="orderNew">📝 信暐訂購單</button>
     </div>
     <!-- 第 3 列：預覽 ／ 新預覽 -->
     <div class="cell a row">
       <h3>預覽</h3>
-      <button class="btn btn-teal" data-act="preview">🔍 配料結果</button>
-      <button class="btn btn-teal" data-act="previewLayout">📐 排列圖</button>
+      <button class="btn sb-pv" data-act="preview">🔍 配料結果</button>
+      <button class="btn sb-pv" data-act="previewLayout">📐 排列圖</button>
     </div>
     <div class="cell b row">
       <h3>新預覽</h3>
-      <button class="btn btn-calm" data-act="newPreview">🔍 配料結果</button>
-      <button class="btn btn-calm" data-act="newPreviewLayout">🗂 排列圖</button>
+      <button class="btn sb-pv2" data-act="newPreview">🔍 配料結果</button>
+      <button class="btn sb-pv2" data-act="newPreviewLayout">🗂 排列圖</button>
     </div>
     <!-- 第 4 列：空白表單 -->
     <div class="cell a row">
       <h3>空白表單</h3>
-      <button class="btn btn-brown" data-act="blankBh">📄 空白配料表</button>
-      <button class="btn btn-brown" data-act="blankSc">📄 空白餘料表</button>
+      <button class="btn sb-blank" data-act="blankBh">📄 空白配料表</button>
+      <button class="btn sb-blank" data-act="blankSc">📄 空白餘料表</button>
     </div>
     <div class="cell b row"></div>
     <!-- 填滿剩餘高度 -->
