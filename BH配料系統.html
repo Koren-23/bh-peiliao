@@ -2488,7 +2488,14 @@ async function writeOrderXlsx(proj_name, proj_no, order_date, items) {
   // 範本的 R 欄是合併的「備註」區塊，逐列寫入會落在合併儲存格內；改為集中寫入 R8 備註欄
   if (notes.length) fill(8, 18, "備註:\n" + notes.join("\n"), "left", {vertical: "top", wrapText: true});
   wb.calcProperties.fullCalcOnLoad = true;
-  const buf = await wb.xlsx.writeBuffer();
+  let buf = await wb.xlsx.writeBuffer();
+  // ExcelJS 會把活頁簿預設字型改成 Calibri 11；改回範本的新細明體 12（與桌面版相同，之後在空白儲存格輸入的文字字型才一致）
+  await loadLib("jszip");
+  const zip = await JSZip.loadAsync(buf);
+  const st = await zip.file("xl/styles.xml").async("string");
+  zip.file("xl/styles.xml", st.replace(/(<fonts[^>]*>\s*)<font>[\s\S]*?<\/font>/,
+    '$1<font><sz val="12"/><name val="新細明體"/><family val="1"/><charset val="136"/></font>'));
+  buf = await zip.generateAsync({type: "uint8array", compression: "DEFLATE"});
   return {blob: new Blob([buf], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), count: merged.length, truncated: merged.length > MAX};
 }
 function orderPreviewHTML(proj_name, proj_no, order_date, items) {

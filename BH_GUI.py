@@ -4674,10 +4674,10 @@ def write_order_xlsx(path, proj_name, proj_no, order_date, items):
     FONT = "標楷體"
     FS   = 14
 
-    def fill(row, col, val, align="left"):
+    def fill(row, col, val, align="left", vertical="center", wrap=None):
         cell = ws.cell(row, col, val)
         cell.font      = Font(name=FONT, size=FS)
-        cell.alignment = Alignment(horizontal=align, vertical="center")
+        cell.alignment = Alignment(horizontal=align, vertical=vertical, wrap_text=wrap)
 
     # ── 工程資訊（Row 3）
     fill(3, 1,
@@ -4696,6 +4696,7 @@ def write_order_xlsx(path, proj_name, proj_no, order_date, items):
         merged[key] += it["qty"]
 
     MAX_ROWS = 19   # row 6~24
+    notes = []
     for i, ((mat, thick, width, length, note), qty) in enumerate(merged.items()):
         if i >= MAX_ROWS:
             break
@@ -4711,7 +4712,12 @@ def write_order_xlsx(path, proj_name, proj_no, order_date, items):
         fill(r, 14, qty)
         fill(r, 15, "片",   align="center")
         if note:
-            fill(r, 18, note)
+            notes.append(f"項次{i+1}：{note}")
+
+    # 範本的 R 欄是合併的「備註」區塊，逐列寫入會落在合併儲存格內（唯讀而出錯）；
+    # 與網頁版相同，集中寫入 R8 備註欄
+    if notes:
+        fill(8, 18, "備註:\n" + "\n".join(notes), vertical="top", wrap=True)
 
     wb.save(path)
 

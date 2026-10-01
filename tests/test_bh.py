@@ -233,6 +233,20 @@ class TestRegressions(unittest.TestCase):
         flags = [c["idx"][1:] for c in res["cut_details"]]
         self.assertTrue(any(f == "*H" for f in flags), flags)
 
+    def test_order_xlsx_with_notes(self):
+        """信暐訂購單：有備註時不可出錯，備註集中寫入 R8（原 bug：寫入合併儲存格而當機）"""
+        from openpyxl import load_workbook
+        items = [{"mat": "SN490B", "thick": 20, "width": 2000, "length": 10000, "qty": 2, "note": "加長"},
+                 {"mat": "SS400", "thick": 12, "width": 1524, "length": 8000, "qty": 3, "note": ""},
+                 {"mat": "SN490B", "thick": 9, "width": 1600, "length": 9000, "qty": 1, "note": "另訂"}]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "order.xlsx")
+            bh.write_order_xlsx(path, "測試工程", "T-001", "2026/10/02", items)
+            ws = load_workbook(path)["世界油箱"]
+            self.assertEqual(ws["R8"].value, "備註:\n項次1：加長\n項次3：另訂")
+            self.assertEqual([ws.cell(6, c).value for c in (1, 3, 4, 5, 7, 9, 14, 15)],
+                             [1, "SN490B", "PL", 20, 2000, 10000, 2, "片"])
+
     def test_type_by_suffix(self):
         """板別以名稱結尾 -F / -W 判斷（原 bug：構件編號含 F 時腹板被當成翼板）"""
         res = plan(dict(BASE_P, cut_mode="single"), [bh_row("FB1", "BH400×200×8×13", 9000, 1)], it=1)
