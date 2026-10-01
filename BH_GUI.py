@@ -2539,8 +2539,39 @@ class BHPeilianApp(tk.Tk):
         #   第 3 列：空白表單    ／ （空白）
         #   第 4 列：填滿剩餘高度
         VIOLET, ORANGE = "#E4DFF1", "#F4E1C9"   # 兩欄皆用淺色底，標題改深色
-        side = tk.Frame(self, bg=VIOLET)
-        side.pack(side="right", fill="y")
+        # 外層可捲動：視窗高度不足時出現捲軸（滑鼠移入側欄可用滾輪捲動）
+        side_wrap = tk.Frame(self, bg=VIOLET)
+        side_wrap.pack(side="right", fill="y")
+        side_cv = tk.Canvas(side_wrap, bg=VIOLET, highlightthickness=0, bd=0)
+        side_sb = ttk.Scrollbar(side_wrap, orient="vertical", command=side_cv.yview)
+        side_cv.configure(yscrollcommand=side_sb.set)
+        side_cv.pack(side="left", fill="y")
+        side = tk.Frame(side_cv, bg=VIOLET)
+        side_win = side_cv.create_window(0, 0, window=side, anchor="nw")
+
+        def _side_fit(_=None):
+            need_h = side.winfo_reqheight()
+            have_h = side_cv.winfo_height()
+            side_cv.configure(width=side.winfo_reqwidth())
+            # 夠高時撐滿（第 4 列填色到底），不夠高時保持內容高度並顯示捲軸
+            side_cv.itemconfigure(side_win, height=max(need_h, have_h))
+            side_cv.configure(scrollregion=(0, 0, side.winfo_reqwidth(), max(need_h, have_h)))
+            if need_h > have_h > 1:
+                if not side_sb.winfo_ismapped():
+                    side_sb.pack(side="right", fill="y")
+            elif side_sb.winfo_ismapped():
+                side_sb.pack_forget()
+                side_cv.yview_moveto(0)
+
+        side.bind("<Configure>", _side_fit)
+        side_cv.bind("<Configure>", _side_fit)
+
+        def _side_wheel(e):
+            if side_sb.winfo_ismapped():
+                side_cv.yview_scroll(int(-e.delta / 120), "units")
+        side_wrap.bind("<Enter>", lambda e: side_cv.bind_all("<MouseWheel>", _side_wheel))
+        side_wrap.bind("<Leave>", lambda e: side_cv.unbind_all("<MouseWheel>"))
+
         for c in (0, 1):
             side.grid_columnconfigure(c, minsize=110, uniform="side")
         side.grid_rowconfigure(4, weight=1)
@@ -2550,7 +2581,7 @@ class BHPeilianApp(tk.Tk):
             f = tk.Frame(side, bg=bg)
             f.grid(row=row, column=col, sticky="nsew")
             if 0 < row < 4:   # 列與列之間的分隔線
-                tk.Frame(f, bg="#B9AED6" if col == 0 else "#D9B48F", height=1).pack(fill="x", padx=8, pady=(8, 4))
+                tk.Frame(f, bg="#B9AED6" if col == 0 else "#D9B48F", height=1).pack(fill="x", padx=8, pady=(6, 2))
             return f
 
         def title(f, text, ghost=False):
@@ -2562,15 +2593,15 @@ class BHPeilianApp(tk.Tk):
 
         def head(f, text):
             tk.Label(f, text=text, bg=f.cget("bg"), fg="#5B3F8C" if f.cget("bg") == VIOLET else "#7B4A1E",
-                     font=("Microsoft JhengHei", 9, "bold")).pack(pady=(6, 4))
+                     font=("Microsoft JhengHei", 9, "bold")).pack(pady=(4, 2))
 
         def btn(f, text, cmd, bg, abg):
             tk.Button(f, text=text, command=cmd,
                       bg=bg, fg="white", activebackground=abg,
                       font=("Microsoft JhengHei", 10, "bold"),
                       relief="flat", cursor="hand2",
-                      width=10, pady=8
-                      ).pack(fill="x", padx=8, pady=4)
+                      width=10, pady=5
+                      ).pack(fill="x", padx=8, pady=3)
 
         # 第 0 列：匯入 ／ 採購修正
         f = cell(0, 0)
