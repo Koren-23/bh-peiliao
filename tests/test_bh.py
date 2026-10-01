@@ -46,17 +46,8 @@ def plan(P, bh_rows, scraps=(), it=8):
 
 
 def pe_rows(res):
-    """與網頁版 buildPeRows 相同：依 規格 + 材質 + 單重 合併採購清單"""
-    merged = {}
-    for p in res["purchase_list"]:
-        k = (p["spec"], p["mat"], p["unit_wt"])
-        merged[k] = merged.get(k, 0) + p["qty"]
-    rows = []
-    for (s, mat, _), q in merged.items():
-        t, w, l = map(int, SPEC_RE.match(s).groups())
-        rows.append({"thick": t, "width": w, "length": l, "orig_width": w, "orig_length": l,
-                     "qty": q, "mat": mat, "orig_spec": s, "note": ""})
-    return rows
+    """採購修正視窗的初始採購列（依 規格 + 材質 + 單重 合併，含片次 cts）"""
+    return pe(res, None)._build_rows()
 
 
 def pe(res, rows):
@@ -168,6 +159,52 @@ class TestRegressions(unittest.TestCase):
                                   ("SS400", f"PL8×{tgt['width']}×{tgt['orig_length']}")})
         self.assertEqual(mod["modified_specs"], {(8, tgt["width"], tgt["length"], "SN490B")})
 
+    def test_split_row_changes_only_some_boards(self):
+        """數量改小拆分：同規格多片只改其中一片，其餘維持原尺寸；改回原尺寸自動併回"""
+        P = dict(BASE_P, cut_mode="single")
+        res = plan(P, [bh_row("A", "BH400×200×8×13", 9000, 12)], it=1)
+        rows = pe_rows(res)
+        i = next(j for j, r in enumerate(rows) if r["qty"] >= 2)
+        w = pe(res, rows)
+        orig, cts = rows[i]["orig_spec"], list(rows[i]["cts"])
+        w._split_row(i, 1)
+        self.assertEqual([r["qty"] for r in rows if r["orig_spec"] == orig], [1, len(cts) - 1])
+        self.assertEqual(rows[i]["cts"] + rows[i + 1]["cts"], cts)
+        rows[i]["length"] += 500
+        mod = w._make_modified_result()
+        specs = {c["idx"]: c["board_spec"] for c in mod["cut_details"]}
+        self.assertEqual(specs[cts[0]], f"PL{rows[i]['thick']}×{rows[i]['width']}×{rows[i]['length']}")
+        for idx in cts[1:]:
+            self.assertEqual(specs[idx], orig)
+        rows[i]["length"] -= 500
+        w._merge_row(i)
+        self.assertEqual([(r["qty"], r["cts"]) for r in rows if r["orig_spec"] == orig], [(len(cts), cts)])
+
+    def test_split_keeps_materials_separate(self):
+        """不同材質：同規格的 SN490B / SS400 各自成列；拆分、修改、併回都只在同材質內進行"""
+        P = dict(BASE_P, cut_mode="single")
+        res = plan(P, [bh_row("X", "BH400×200×8×13", 9000, 12, "SN490B"),
+                       bh_row("Y", "BH400×200×8×13", 9000, 12, "SS400")], it=1)
+        rows = pe_rows(res)
+        mats = {r["mat"]: r for r in rows if r["thick"] == 8}
+        self.assertEqual(set(mats), {"SN490B", "SS400"})
+        self.assertEqual(mats["SN490B"]["orig_spec"], mats["SS400"]["orig_spec"])   # 同規格、不同材質
+        ct_mat = {c["idx"]: c["mat"] for c in res["cut_details"]}
+        for r in rows:
+            self.assertTrue(all(ct_mat[idx] == r["mat"] for idx in r["cts"]), "片次材質與採購列不符")
+        w = pe(res, rows)
+        i = rows.index(mats["SN490B"])
+        w._split_row(i, 1)
+        rows[i]["length"] += 500
+        mod = w._make_modified_result()
+        changed = {c["mat"] for c in mod["cut_details"] if c["board_spec"].endswith(f"×{rows[i]['length']}")}
+        self.assertEqual(changed, {"SN490B"})
+        # SN490B 拆出的原尺寸列與 SS400 列同規格，但材質不同，合併時不可併在一起
+        w._merge_row(i)
+        same = [r["mat"] for r in rows if r["thick"] == 8 and r["width"] == rows[i]["orig_width"]
+                and r["length"] == rows[i]["orig_length"]]
+        self.assertEqual(sorted(same), ["SN490B", "SS400"])
+
     def test_check_size_only_same_board(self):
         """尺寸檢查只比對使用該規格的片次（原 bug：拿同寬的長板來比，誤判板長不足）"""
         P = dict(BASE_P, cut_mode="single")
@@ -218,15 +255,23 @@ class TestWebDesktopParity(unittest.TestCase):
             res = plan(c["P"], c["bh"], c["scraps"], c["it"])
             rows = pe_rows(res)
             c["edits"] = []
-            for row in rnd.sample(rows, min(2, len(rows))):
-                st = {"width": row["width"] + rnd.choice([-50, 0, 100]), "length": row["length"] + rnd.choice([-300, 0, 500])}
-                c["edits"].append({"spec": row["orig_spec"], "mat": row["mat"], "set": st})
-                row.update(st)
-            mod = pe(res, rows)._make_modified_result()
+            w = pe(res, rows)
+            for spec, mat in [(r["orig_spec"], r["mat"]) for r in rnd.sample(rows, min(2, len(rows)))]:
+                i = next(j for j, x in enumerate(rows) if x["orig_spec"] == spec and x["mat"] == mat)
+                st = {"width": rows[i]["width"] + rnd.choice([-50, 0, 100]),
+                      "length": rows[i]["length"] + rnd.choice([-300, 0, 500])}
+                e = {"spec": spec, "mat": mat, "set": st}
+                if rows[i]["qty"] > 1 and rnd.random() < .6:   # 一部分先拆分再修改
+                    e["split"] = rnd.randint(1, rows[i]["qty"] - 1)
+                    w._split_row(i, e["split"])
+                rows[i].update(st)
+                c["edits"].append(e)
+            mod = w._make_modified_result()
             dump = lambda r: {"board": [x["board_spec"] for x in r["cut_details"]], "left": [x["leftover"] for x in r["cut_details"]],
                               "type": [x["type"] for x in r["cut_details"]], "scraps": [s["spec"] for s in r["new_scraps"]],
                               "buy": [p["spec"] for p in r["purchase_list"]]}
-            py_out.append({"orig": dump(res), "mod": dump(mod), "check": [list(pe(res, rows)._check_size(r)) for r in rows]})
+            py_out.append({"orig": dump(res), "mod": dump(mod), "check": [list(w._check_size(r)) for r in rows],
+                           "rows": [[r["orig_spec"], r["mat"], r["width"], r["length"], r["qty"], r["cts"]] for r in rows]})
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf8") as f:
             json.dump(cases, f, ensure_ascii=False)
         try:
@@ -242,6 +287,8 @@ class TestWebDesktopParity(unittest.TestCase):
                         self.assertEqual(js[k][fld], py[k][fld])
             with self.subTest(case=n, part="checkSize"):
                 self.assertEqual(js["check"], py["check"])
+            with self.subTest(case=n, part="rows"):
+                self.assertEqual(js["rows"], py["rows"])
 
 
 if __name__ == "__main__":

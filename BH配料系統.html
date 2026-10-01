@@ -124,6 +124,7 @@ table.grid{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px
 .grid.edit tr.sel td{background:var(--row-sel)!important}
 .grid input.cellbox{width:92px;font:inherit;font-size:13.5px;padding:4px 6px;border:1px solid var(--line);border-radius:5px;text-align:center;background:#fff}
 .grid input.cellbox.note{width:170px;text-align:left}
+.grid input.cellbox.qty{width:56px}
 .grid input.cellbox.over{color:#C53030;font-weight:700;border-color:#C53030;background:#FFF5F5}
 .grid .over-txt{color:#C53030;font-weight:700}
 .pe-lim-row{display:flex;align-items:center;gap:8px;min-height:26px} .pe-lim-row .btn{padding:1px 10px}
@@ -2215,8 +2216,35 @@ function buildPeRows(r) {
   return mergePurchase(r.purchase_list).map(v => {
     const m = specRe.exec(v.spec);
     const thick = m ? +m[1] : 0, width = m ? +m[2] : 0, length = m ? +m[3] : 0;
-    return {thick, width, length, orig_width: width, orig_length: length, qty: v.qty, mat: v.mat, orig_spec: v.spec, note: ""};
+    // cts：這一列包含的切割片次（同規格、同材質的新板，依片次順序）
+    const key = peBoardKey(thick, width, length, v.mat);
+    const cts = r.cut_details.filter(ct => !ct.is_scrap && ctBoardKey(ct) === key).map(ct => ct.idx);
+    return {thick, width, length, orig_width: width, orig_length: length, qty: v.qty, mat: v.mat, orig_spec: v.spec, note: "", cts};
   });
+}
+/* 拆分採購列：第 i 列保留前 k 片（片次），其餘片數另成一列並恢復原本配出來的長寬 */
+function peSplitRow(rows, i, k) {
+  const row = rows[i];
+  if (!(k >= 1 && k < row.qty)) return;
+  const rest = Object.assign({}, row, {width: row.orig_width, length: row.orig_length, qty: row.qty - k,
+                                       cts: (row.cts || []).slice(k), note: "", lim_ignored: null});
+  row.qty = k; row.cts = (row.cts || []).slice(0, k);
+  rows.splice(i + 1, 0, rest);
+  // 拆出的原尺寸列若已有相同的列（先前拆分留下的）就併入，但不併回剛拆分的第 i 列
+  peMergeRow(rows, i + 1, i);
+}
+/* 第 i 列與其他相同的採購列（同原始規格、同材質、同目前尺寸）合併：修改後與另一列相同時自動併回。
+   skip：不與該列合併。回傳合併後第 i 列所在的索引 */
+function peMergeRow(rows, i, skip) {
+  const a = rows[i];
+  const j = rows.findIndex((b, n) => n !== i && n !== skip &&
+    a.orig_spec === b.orig_spec && a.mat === b.mat && a.width === b.width && a.length === b.length);
+  if (j < 0) return i;
+  const lo = Math.min(i, j), hi = Math.max(i, j), keep = rows[lo], drop = rows[hi];
+  keep.qty += drop.qty; keep.cts = (keep.cts || []).concat(drop.cts || []);
+  if (!keep.note && drop.note) keep.note = drop.note;
+  rows.splice(hi, 1);
+  return lo;
 }
 const peWt = (r, row) => pyRound(calcWeight(row.width, row.thick, row.length, r.params.density), 0);
 const peSpec = row => `PL${row.thick}×${row.width}×${row.length}`;
@@ -2243,13 +2271,18 @@ const askIgnoreLimit = (title, text, okLabel) => dialog({title, text, kind: "war
 const peBoardKey = (t, w, l, mat) => `${t},${w},${l},${mat}`;
 const peRowKey = row => { const mo = specRe.exec(row.orig_spec); return mo ? peBoardKey(+mo[1], +mo[2], +mo[3], row.mat) : null; };
 const ctBoardKey = ct => { const m = specRe.exec(ct.board_spec); return m ? peBoardKey(+m[1], +m[2], +m[3], ct.mat) : null; };
+/* 判斷片次是否屬於這一列：有 cts 依片次，否則依規格 + 材質 */
+const peRowCts = row => {
+  if (row.cts) { const set = new Set(row.cts); return ct => set.has(ct.idx); }
+  const key = peRowKey(row); return ct => ctBoardKey(ct) === key;
+};
 function checkSize(r, row) {
   const kerf = r.params.new_kerf, trim = r.params.new_trim, cur_w = row.width, cur_l = row.length;
   if (cur_w >= row.orig_width && cur_l >= row.orig_length) return [true, ""];
-  // 只檢查實際使用這個採購規格（同規格、同材質）的片次
-  const key = peRowKey(row), errors = [];
+  // 只檢查這一列包含的片次
+  const mine = peRowCts(row), errors = [];
   r.cut_details.forEach(ct => {
-    if (ct.is_scrap || !ct.layout || ctBoardKey(ct) !== key) return;
+    if (ct.is_scrap || !ct.layout || !mine(ct)) return;
     const L = ct.layout, nr = L.rows.filter(x => x.parts && x.parts.length).length;
     // 板寬需容納所有排（排寬 + 排間鋸縫 + 兩側修邊）；板長需容納最長的一整排（各段零件 + 段間鋸縫 + 兩端修邊）
     const nw = nr * L.part_w + Math.max(0, nr - 1) * kerf + trim * 2;
@@ -2265,13 +2298,13 @@ function makeModifiedResult(base, rows) {
   r.modified_specs = new Set(rows.filter(row => row.width !== row.orig_width || row.length !== row.orig_length)
                                  .map(row => peBoardKey(row.thick, row.width, row.length, row.mat)));
   r.purchase_list = rows.map(row => { const wt = Math.trunc(peWt(base, row)); return {spec: peSpec(row), qty: row.qty, mat: row.mat, unit_wt: wt, total_wt: wt * row.qty}; });
-  const row_map = new Map();
-  rows.forEach(row => { const k = peRowKey(row); if (k) row_map.set(k, row); });
+  const matchers = rows.map(row => [peRowCts(row), row]);
+  const rowOf = ct => { const hit = matchers.find(([f]) => f(ct)); return hit ? hit[1] : null; };
   const new_scraps = [];
   // 未重新計算的片次（使用現有餘料、或找不到對應採購規格）保留原本產生的餘料
   const keepOld = ct => r.new_scraps.forEach(sc => { if (sc.src === ct.idx) new_scraps.push(sc); });
   r.cut_details.forEach(ct => {
-    const row = ct.is_scrap || !ct.layout ? null : row_map.get(ctBoardKey(ct));
+    const row = ct.is_scrap || !ct.layout ? null : rowOf(ct);
     if (!row) { keepOld(ct); return; }
     const L = ct.layout, nbw = row.width, nbl = row.length;
     ct.board_spec = peSpec(row);
@@ -2292,7 +2325,7 @@ function openPurchaseEdit() {
   const r = S.result;
   if (!S.peRows) S.peRows = buildPeRows(r);
   const m = openModal({
-    title: "新採購清單　── 可修改板寬 / 板長 / 備註（板厚不可調整）", size: "lg",
+    title: "新採購清單　── 可修改板寬 / 板長 / 數量 / 備註（板厚不可調整；數量改小可拆分出要修改的片數）", size: "xl",
     bodyHTML: `<div class="pe-host" style="flex:1;min-height:0;display:flex;flex-direction:column"></div><div class="pe-err warn-note" style="margin-top:8px;white-space:pre-wrap"></div><div class="pe-lim warn-note" style="margin-top:6px;white-space:pre-wrap"></div>`,
     footHTML: `<button class="btn btn-gray" data-a="reset">↩ 重設</button><button class="btn btn-slate" data-a="debug">🔍 診斷</button><span class="grow"></span><button class="btn btn-green" data-a="confirm">✅ 完成</button>`
   });
@@ -2317,13 +2350,13 @@ function openPurchaseEdit() {
       const box = (k, label) => `<input class="cellbox${cls(k)}" ${tipOf(k) ? `title="${esc(tipOf(k))}"` : ""} data-k="${k}" value="${row[k]}" inputmode="numeric" aria-label="${label}">`;
       return {cls: !ok ? "error" : changed ? "changed" : (i % 2 ? "even" : "odd"), attrs: `data-i="${i}" ${tip ? `title="${esc(tip)}"` : ""}`,
         cells: [i + 1, row.thick, {html: box("width", "板寬")}, {html: box("length", "板長")},
-          row.qty, row.mat,
+          {html: `<input class="cellbox qty" data-k="qty" value="${row.qty}" inputmode="numeric" aria-label="數量" title="改小可拆分：其餘片數另成一列並保留原尺寸">`}, row.mat,
           iss.wt || ignIss.wt ? {html: `<span class="${iss.wt ? "over-txt" : "ign-txt"}" title="${esc(tipOf("wt"))}">${Math.trunc(wt)}</span>`} : Math.trunc(wt), Math.trunc(tot),
           {html: `<input class="cellbox note" data-k="note" value="${esc(row.note || "")}" placeholder="（如：調整板片大小說明）" aria-label="備註">`},
-          row.orig_spec]};
+          row.orig_spec, (row.cts || []).join("、")]};
     });
-    html.push({cls: "tot", cells: ["", "合計", "", "", tq, "", "總重(kg)：", fmtInt(tw), "", ""]});
-    host.innerHTML = gridHTML(["NO", "板厚(mm)", "板寬(mm)", "板長(mm)", "數量", "材質", "單片重(kg)", "總重(kg)", "備註", "原始規格"], html);
+    html.push({cls: "tot", cells: ["", "合計", "", "", tq, "", "總重(kg)：", fmtInt(tw), "", "", ""]});
+    host.innerHTML = gridHTML(["NO", "板厚(mm)", "板寬(mm)", "板長(mm)", "數量", "材質", "單片重(kg)", "總重(kg)", "備註", "原始規格", "片次"], html);
     errBox.textContent = hasErr ? "⚠ 以下項目尺寸不足（紅色底色），無法裁切：\n" + errs.join("\n") : "";
     const limLine = (x, btn) => `<div class="pe-lim-row">${esc(x.text)}${btn}</div>`;
     limBox.innerHTML =
@@ -2338,17 +2371,30 @@ function openPurchaseEdit() {
     const inp = e.target.closest("input[data-k]"); if (!inp) return;
     const i = +inp.closest("tr").dataset.i, row = S.peRows[i], k = inp.dataset.k;
     if (k === "note") { row.note = inp.value; return; }
+    if (k === "qty") {
+      // 數量只能改小：改小時拆分成兩列，其餘片數保留原本配出來的長寬
+      let q;
+      try { q = pyInt(inp.value); if (q < 1 || q > row.qty) throw new Error(); }
+      catch (err) { showWarn("輸入錯誤", `數量請輸入 1 ~ ${row.qty} 之間的整數。\n\n數量只能改小（拆分），總片數需與配料結果相同。`); inp.value = row.qty; return; }
+      if (q === row.qty) return;
+      const moved = row.cts ? row.cts.slice(q).join("、") : "";
+      peSplitRow(S.peRows, i, q); refresh();
+      setStatus(`已拆分：NO ${i + 1} 保留 ${q} 片，其餘片次（${moved}）另成一列並恢復原尺寸。`);
+      return;
+    }
     let v;
     try { v = pyInt(inp.value); if (v < 1 || v > 99999) throw new Error(); }
     catch (err) { showWarn("輸入錯誤", `請輸入 1 ~ 99999 之間的整數（mm）。`); inp.value = row[k]; return; }
-    row[k] = v; refresh();
-    const [ok, msg] = checkSize(r, row);
-    const limMsgs = peActiveLimitMsgs(r, row);
+    row[k] = v;
+    const cur = S.peRows[peMergeRow(S.peRows, i)];   // 與其他相同的列合併後，以合併後的列檢查
+    refresh();
+    const [ok, msg] = checkSize(r, cur);
+    const limMsgs = peActiveLimitMsgs(r, cur);
     if (!ok) showWarn("尺寸不足", `⚠ 鐵板片數不足，無法裁切！\n\n${msg}\n\n請調大板寬或板長。` +
                       (limMsgs.length ? `\n\n另外超出採購限制：\n${limMsgs.join("\n")}` : ""));
     else if (limMsgs.length && await askIgnoreLimit("超出採購限制",
-        `⚠ ${peSpec(row)} 超出採購限制：\n\n${limMsgs.join("\n")}\n\n若確認此規格可採購，可按「忽略並繼續」。`, "忽略並繼續")) {
-      peIgnore(row); refresh();
+        `⚠ ${peSpec(cur)} 超出採購限制：\n\n${limMsgs.join("\n")}\n\n若確認此規格可採購，可按「忽略並繼續」。`, "忽略並繼續")) {
+      peIgnore(cur); refresh();
     }
   });
   // 超出採購限制：忽略 / 取消忽略

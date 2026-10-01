@@ -4067,40 +4067,82 @@ class PurchaseEditWindow(tk.Toplevel):
         self.parent = parent
         self.result = result
         self.title("新採購清單")
-        self.geometry("900x580")
+        self.geometry("1040x580")
         self.configure(bg=CLR_BG)
         self.resizable(True, True)
 
         # 若主視窗已有保留的 rows（上次修改），直接沿用；否則重新建立
         saved_rows = getattr(parent, "_purchase_edit_rows", None)
 
-        if saved_rows is None:
-            from collections import OrderedDict
-            import re, copy
-            merged = OrderedDict()
-            for p in result["purchase_list"]:
-                key = (p["spec"], p["mat"], p["unit_wt"])
-                if key not in merged:
-                    merged[key] = {"qty": 0, "total_wt": 0, "mat": p["mat"], "unit_wt": p["unit_wt"]}
-                merged[key]["qty"]      += p["qty"]
-                merged[key]["total_wt"] += p["total_wt"]
-
-            self.rows = []
-            for (spec, mat, unit_wt), val in merged.items():
-                m = re.match(r"PL(\d+)×(\d+)×(\d+)", spec)
-                thick  = int(m.group(1)) if m else 0
-                width  = int(m.group(2)) if m else 0
-                length = int(m.group(3)) if m else 0
-                self.rows.append({
-                    "thick": thick, "width": width, "length": length,
-                    "orig_width": width, "orig_length": length,
-                    "qty": val["qty"], "mat": mat,
-                    "orig_spec": spec, "note": ""
-                })
-        else:
-            self.rows = saved_rows
+        self.rows = self._build_rows() if saved_rows is None else saved_rows
 
         self._build()
+
+    # ── 採購列 ────────────────────────────────────────────────────
+    def _build_rows(self):
+        """依 規格 + 材質 + 單重 合併採購清單；cts 為這一列包含的切割片次（依片次順序）"""
+        import re
+        from collections import OrderedDict
+        merged = OrderedDict()
+        for p in self.result["purchase_list"]:
+            key = (p["spec"], p["mat"], p["unit_wt"])
+            merged[key] = merged.get(key, 0) + p["qty"]
+        rows = []
+        for (spec, mat, unit_wt), qty in merged.items():
+            m = re.match(r"PL(\d+)×(\d+)×(\d+)", spec)
+            thick  = int(m.group(1)) if m else 0
+            width  = int(m.group(2)) if m else 0
+            length = int(m.group(3)) if m else 0
+            key = self._board_key(thick, width, length, mat)
+            cts = [ct["idx"] for ct in self.result["cut_details"]
+                   if not ct.get("is_scrap") and self._ct_key(ct) == key]
+            rows.append({
+                "thick": thick, "width": width, "length": length,
+                "orig_width": width, "orig_length": length,
+                "qty": qty, "mat": mat, "orig_spec": spec, "note": "", "cts": cts
+            })
+        return rows
+
+    def _split_row(self, i, k):
+        """拆分採購列：第 i 列保留前 k 片（片次），其餘片數另成一列並恢復原本配出來的長寬"""
+        row = self.rows[i]
+        if not (1 <= k < row["qty"]):
+            return
+        rest = dict(row, width=row["orig_width"], length=row["orig_length"], qty=row["qty"] - k,
+                    cts=list(row.get("cts", []))[k:], note="", lim_ignored=None)
+        row["qty"] = k
+        row["cts"] = list(row.get("cts", []))[:k]
+        self.rows.insert(i + 1, rest)
+        # 拆出的原尺寸列若已有相同的列（先前拆分留下的）就併入，但不併回剛拆分的第 i 列
+        self._merge_row(i + 1, skip=i)
+
+    def _merge_row(self, i, skip=None):
+        """
+        第 i 列與其他相同的採購列（同原始規格、同材質、同目前尺寸）合併：
+        修改後與另一列相同時自動併回。skip：不與該列合併。回傳合併後第 i 列所在的索引
+        """
+        a = self.rows[i]
+        sig = (a["orig_spec"], a["mat"], a["width"], a["length"])
+        j = next((n for n, b in enumerate(self.rows) if n != i and n != skip
+                  and (b["orig_spec"], b["mat"], b["width"], b["length"]) == sig), None)
+        if j is None:
+            return i
+        lo, hi = min(i, j), max(i, j)
+        keep, drop = self.rows[lo], self.rows[hi]
+        keep["qty"] += drop["qty"]
+        keep["cts"] = list(keep.get("cts", [])) + list(drop.get("cts", []))
+        if not keep.get("note") and drop.get("note"):
+            keep["note"] = drop["note"]
+        del self.rows[hi]
+        return lo
+
+    def _row_matcher(self, row):
+        """判斷片次是否屬於這一列：有 cts 依片次，否則依規格 + 材質"""
+        if "cts" in row:
+            cts = set(row["cts"])
+            return lambda ct: ct["idx"] in cts
+        key = self._row_key(row)
+        return lambda ct: self._ct_key(ct) == key
 
     # ── 重量計算 ──────────────────────────────────────────────────
     def _wt(self, row):
@@ -4187,12 +4229,12 @@ class PurchaseEditWindow(tk.Toplevel):
         if cur_w >= row.get("orig_width", cur_w) and cur_l >= row.get("orig_length", cur_l):
             return True, ""
 
-        # 只檢查實際使用這個採購規格（同規格、同材質）的片次
-        key = self._row_key(row)
+        # 只檢查這一列包含的片次
+        mine = self._row_matcher(row)
         errors = []
         for ct in self.result["cut_details"]:
             layout = ct.get("layout")
-            if ct.get("is_scrap") or not layout or self._ct_key(ct) != key:
+            if ct.get("is_scrap") or not layout or not mine(ct):
                 continue
             num_rows = len([r for r in layout.get("rows", []) if r.get("parts")])
             # 板寬需容納所有排；板長需容納最長的一整排（各段零件 + 段間鋸縫 + 兩端修邊）
@@ -4211,21 +4253,21 @@ class PurchaseEditWindow(tk.Toplevel):
         hdr = tk.Frame(self, bg=CLR_HEADER, height=44)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        tk.Label(hdr, text="新採購清單　── 雙擊板寬/板長可修改尺寸",
+        tk.Label(hdr, text="新採購清單　── 雙擊板寬/板長可修改尺寸；雙擊數量可拆分出要修改的片數",
                  bg=CLR_HEADER, fg="white",
                  font=("Microsoft JhengHei", 11, "bold")).pack(side="left", padx=12, pady=8)
 
         frame = tk.Frame(self, bg=CLR_BG)
         frame.pack(fill="both", expand=True, padx=8, pady=4)
 
-        cols = ("NO","板厚(mm)","板寬(mm)","板長(mm)","數量","材質","單片重(kg)","總重(kg)","備註","原始規格")
+        cols = ("NO","板厚(mm)","板寬(mm)","板長(mm)","數量","材質","單片重(kg)","總重(kg)","備註","原始規格","片次")
         vsb  = ttk.Scrollbar(frame, orient="vertical")
         hsb  = ttk.Scrollbar(frame, orient="horizontal")
         self.tree = ttk.Treeview(frame, columns=cols, show="headings",
                                  yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         vsb.config(command=self.tree.yview)
         hsb.config(command=self.tree.xview)
-        for col, w in zip(cols, [45,80,80,90,55,70,100,100,160,180]):
+        for col, w in zip(cols, [45,80,80,90,55,70,100,100,160,180,120]):
             self.tree.heading(col, text=col)
             self.tree.column(col, width=w, anchor="center")
         self.tree.tag_configure("odd",  background=CLR_ROW_ODD)
@@ -4313,12 +4355,12 @@ class PurchaseEditWindow(tk.Toplevel):
                              values=(i+1, row["thick"], mark("width", row["width"]),
                                      mark("length", row["length"]),
                                      row["qty"], row["mat"], mark("wt", int(wt)), int(tot),
-                                     row.get("note",""), row["orig_spec"]))
+                                     row.get("note",""), row["orig_spec"], "、".join(row.get("cts", []))))
             total_wt  += tot
             total_qty += row["qty"]
         self.tree.insert("", "end", tags=("tot",),
                          values=("", "合計", "", "", total_qty, "",
-                                 "總重(kg)：", f"{total_wt:,.0f}", "", ""))
+                                 "總重(kg)：", f"{total_wt:,.0f}", "", "", ""))
         if hasattr(self, "_lim_lbl"):
             txt = ""
             if lims:
@@ -4337,13 +4379,28 @@ class PurchaseEditWindow(tk.Toplevel):
     def _on_dbl(self, event):
         if self.tree.identify("region", event.x, event.y) != "cell": return
         col_n = int(self.tree.identify_column(event.x).replace("#",""))
-        if col_n not in (3, 4, 9): return   # 板寬=3, 板長=4, 備註=9（板厚不可調整）
+        if col_n not in (3, 4, 5, 9): return   # 板寬=3, 板長=4, 數量=5, 備註=9（板厚不可調整）
         iid = self.tree.identify_row(event.y)
         if not iid or not iid.isdigit(): return
         idx = int(iid)
         row = self.rows[idx]
-        field_map = {3: ("板寬", "width"), 4: ("板長", "length"), 9: ("備註", "note")}
+        field_map = {3: ("板寬", "width"), 4: ("板長", "length"), 5: ("數量", "qty"), 9: ("備註", "note")}
         label, key = field_map[col_n]
+        if key == "qty":
+            # 數量只能改小：改小時拆分成兩列，其餘片數保留原本配出來的長寬
+            if row["qty"] <= 1:
+                messagebox.showinfo("提示", "此列只有 1 片，無法再拆分。", parent=self)
+                return
+            val = tk.simpledialog.askinteger(
+                "修改數量（拆分）",
+                f"目前 {row['qty']} 片（片次：{'、'.join(row.get('cts', []))}）。\n"
+                f"請輸入要保留在此列的片數（1 ~ {row['qty']}），\n其餘片數會另成一列並恢復原本配出來的長寬：",
+                initialvalue=row["qty"], minvalue=1, maxvalue=row["qty"], parent=self)
+            if val is None or val == row["qty"]:
+                return
+            self._split_row(idx, val)
+            self._refresh()
+            return
         if key == "note":
             val = tk.simpledialog.askstring(
                 "修改備註", "請輸入備註（如：和調整板片大小說明）：",
@@ -4357,8 +4414,8 @@ class PurchaseEditWindow(tk.Toplevel):
             initialvalue=row[key], minvalue=1, maxvalue=99999, parent=self)
         if val is None: return
         # 檢查縮小警告（修改前先比較）
-        old_val = row[key]
         row[key] = val
+        row = self.rows[self._merge_row(idx)]   # 與其他相同的列合併後，以合併後的列檢查
         self._refresh()
         ok, msg = self._check_size(row, row["orig_spec"])
         lim_msgs = self._active_limit_msgs(row)
@@ -4412,28 +4469,10 @@ class PurchaseEditWindow(tk.Toplevel):
         messagebox.showinfo("診斷", msg)
 
     def _reset(self):
-        import re
-        from collections import OrderedDict
         # 清除主視窗記憶
         self.parent._purchase_edit_rows   = None
         self.parent._purchase_edit_result = None
-        merged = OrderedDict()
-        for p in self.result["purchase_list"]:
-            key = (p["spec"], p["mat"], p["unit_wt"])
-            if key not in merged:
-                merged[key] = {"qty": 0, "mat": p["mat"], "unit_wt": p["unit_wt"]}
-            merged[key]["qty"] += p["qty"]
-        self.rows = []
-        for (spec, mat, unit_wt), val in merged.items():
-            m = re.match(r"PL(\d+)×(\d+)×(\d+)", spec)
-            thick  = int(m.group(1)) if m else 0
-            width  = int(m.group(2)) if m else 0
-            length = int(m.group(3)) if m else 0
-            self.rows.append({
-                "thick": thick, "width": width, "length": length,
-                "orig_width": width, "orig_length": length,
-                "qty": val["qty"], "mat": mat, "orig_spec": spec, "note": ""
-            })
+        self.rows = self._build_rows()
         self._refresh()
 
     def _confirm(self):
@@ -4517,12 +4556,11 @@ class PurchaseEditWindow(tk.Toplevel):
             r["purchase_list"].append({"spec": self._spec(row), "qty": row["qty"], "mat": row["mat"],
                                        "unit_wt": wt, "total_wt": wt * row["qty"]})
 
-        # 原始規格 + 材質 → 採購列
-        row_map = {}
-        for row in self.rows:
-            k = self._row_key(row)
-            if k:
-                row_map[k] = row
+        # 片次 → 採購列
+        matchers = [(self._row_matcher(row), row) for row in self.rows]
+
+        def row_of(ct):
+            return next((row for f, row in matchers if f(ct)), None)
 
         new_scraps = []
         old_scraps = r.get("new_scraps", [])
@@ -4533,7 +4571,7 @@ class PurchaseEditWindow(tk.Toplevel):
 
         for ct in r["cut_details"]:
             layout = ct.get("layout")
-            row = None if ct.get("is_scrap") or not layout else row_map.get(self._ct_key(ct))
+            row = None if ct.get("is_scrap") or not layout else row_of(ct)
             if row is None:
                 keep_old(ct)
                 continue

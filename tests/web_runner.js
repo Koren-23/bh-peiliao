@@ -16,13 +16,13 @@ const grab = start => {
 };
 const ui = [
   line("const specRe"), line("const layoutRowUsed"), line("const layoutRowLeft"),
-  grab("function mergePurchase"), grab("function buildPeRows"),
+  grab("function mergePurchase"), grab("function buildPeRows"), grab("function peSplitRow"), grab("function peMergeRow"),
   "const peWt = (r, row) => pyRound(calcWeight(row.width, row.thick, row.length, r.params.density), 0);",
   "const peSpec = row => `PL${row.thick}×${row.width}×${row.length}`;",
-  line("const peBoardKey"), line("const peRowKey"), line("const ctBoardKey"),
+  line("const peBoardKey"), line("const peRowKey"), line("const ctBoardKey"), grab("const peRowCts") + ";",
   grab("function checkSize"), grab("function makeModifiedResult"),
 ].join("\n");
-const T = (0, eval)(core + "\n" + ui + "\n({planPurchase, decomposeBH, buildPeRows, makeModifiedResult, checkSize});");
+const T = (0, eval)(core + "\n" + ui + "\n({planPurchase, decomposeBH, buildPeRows, peSplitRow, makeModifiedResult, checkSize});");
 
 const dump = r => ({
   board: r.cut_details.map(c => c.board_spec), left: r.cut_details.map(c => c.leftover),
@@ -37,8 +37,13 @@ const out = cases.map(c => {
   const res = T.planPurchase(parts, c.P, JSON.parse(JSON.stringify(c.scraps)), c.it);
   res.params = c.P;
   const rows = T.buildPeRows(res);
-  (c.edits || []).forEach(e => { const row = rows.find(x => x.orig_spec === e.spec && x.mat === e.mat); Object.assign(row, e.set); });
+  (c.edits || []).forEach(e => {
+    const i = rows.findIndex(x => x.orig_spec === e.spec && x.mat === e.mat);
+    if (e.split) T.peSplitRow(rows, i, e.split);   // 拆分：第 i 列保留前 split 片
+    Object.assign(rows[i], e.set);
+  });
   const mod = T.makeModifiedResult(res, rows);
-  return {orig: dump(res), mod: dump(mod), check: rows.map(row => T.checkSize(res, row))};
+  return {orig: dump(res), mod: dump(mod), check: rows.map(row => T.checkSize(res, row)),
+          rows: rows.map(row => [row.orig_spec, row.mat, row.width, row.length, row.qty, row.cts])};
 });
 process.stdout.write(JSON.stringify(out));
