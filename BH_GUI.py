@@ -4139,6 +4139,28 @@ class PurchaseEditWindow(tk.Toplevel):
     def _spec(self, row):
         return f'PL{row["thick"]}×{row["width"]}×{row["length"]}'
 
+    def _limit_issues(self, row):
+        """採購限制檢查（板寬 / 板長 / 單片重），回傳各欄的超出說明（未超出為空字串）"""
+        p  = self.result["params"]
+        wt = int(self._wt(row))
+
+        def chk(label, v, lo, hi, unit):
+            if v < lo:
+                return f"{label} {v:,}{unit} 低於最小值 {lo:,}{unit}"
+            if v > hi:
+                return f"{label} {v:,}{unit} 超過最大值 {hi:,}{unit}"
+            return ""
+
+        return {
+            "width":  chk("板寬", row["width"], p.get("bw_min", BW_MIN), p.get("bw_max", BW_MAX), "mm"),
+            "length": chk("板長", row["length"], p.get("bl_min", BL_MIN), p.get("bl_max", BL_MAX), "mm"),
+            "wt":     chk("單片重", wt, p.get("w_min", W_MIN), p.get("w_max", W_MAX), "kg"),
+        }
+
+    @staticmethod
+    def _limit_msgs(iss):
+        return [m for m in (iss["width"], iss["length"], iss["wt"]) if m]
+
     def _check_size(self, row, orig_spec):
         """檢查修改後板寬/板長是否足夠裁切零件，回傳 (ok, msg)"""
         import re
@@ -4278,6 +4300,11 @@ class PurchaseEditWindow(tk.Toplevel):
         frame.columnconfigure(0, weight=1)
         self.tree.bind("<Double-1>", self._on_dbl)
 
+        # 超出採購限制說明（Treeview 無法單格變色，超出的數字以 ⚠ 標示、整列紅字）
+        self._lim_lbl = tk.Label(self, text="", bg=CLR_BG, fg="#C53030", justify="left",
+                                 anchor="w", font=("Microsoft JhengHei", 9))
+        self._lim_lbl.pack(fill="x", padx=10)
+
         btn_bar = tk.Frame(self, bg=CLR_BG)
         btn_bar.pack(fill="x", padx=10, pady=8)
 
@@ -4305,15 +4332,21 @@ class PurchaseEditWindow(tk.Toplevel):
         self.tree.tag_configure("tot",     background="#D6EAF8", font=("Microsoft JhengHei", 9, "bold"))
         self.tree.tag_configure("error",   background="#FED7D7")
         self.tree.tag_configure("changed", background="#C6EFCE")
+        self.tree.tag_configure("over",    foreground="#C53030")
         total_wt  = 0
         total_qty = 0
         has_error = False
+        lims = []
         for i, row in enumerate(self.rows):
             wt  = self._wt(row)
             tot = wt * row["qty"]
             ok, msg = self._check_size(row, row["orig_spec"])
             changed = (row["width"]  != row.get("orig_width",  row["width"]) or
                        row["length"] != row.get("orig_length", row["length"]))
+            iss = self._limit_issues(row)
+            lim_msgs = self._limit_msgs(iss)
+            if lim_msgs:
+                lims.append(f"• NO {i+1}　{self._spec(row)}：{'；'.join(lim_msgs)}")
             if not ok:
                 tag = ("error",)
                 has_error = True
@@ -4321,15 +4354,22 @@ class PurchaseEditWindow(tk.Toplevel):
                 tag = ("changed",)
             else:
                 tag = ("ok" if i%2==0 else "ok2",)
+            if lim_msgs:
+                tag = tag + ("over",)
+            mark = lambda k, v: f"⚠{v}" if iss[k] else v
             self.tree.insert("", "end", iid=str(i), tags=tag,
-                             values=(i+1, row["thick"], row["width"], row["length"],
-                                     row["qty"], row["mat"], int(wt), int(tot),
+                             values=(i+1, row["thick"], mark("width", row["width"]),
+                                     mark("length", row["length"]),
+                                     row["qty"], row["mat"], mark("wt", int(wt)), int(tot),
                                      row.get("note",""), row["orig_spec"]))
             total_wt  += tot
             total_qty += row["qty"]
         self.tree.insert("", "end", tags=("tot",),
                          values=("", "合計", "", "", total_qty, "",
                                  "總重(kg)：", f"{total_wt:,.0f}", "", ""))
+        if hasattr(self, "_lim_lbl"):
+            self._lim_lbl.config(text=("⚠ 以下項目超出採購限制（紅字 ⚠），請確認是否可採購：\n"
+                                       + "\n".join(lims)) if lims else "")
         if hasattr(self, "_btn_confirm"):
             if has_error:
                 self._btn_confirm.config(state="disabled", bg="#AAAAAA",
@@ -4365,10 +4405,16 @@ class PurchaseEditWindow(tk.Toplevel):
         row[key] = val
         self._refresh()
         ok, msg = self._check_size(row, row["orig_spec"])
+        lim_msgs = self._limit_msgs(self._limit_issues(row))
         if not ok:
             row[key] = val  # 保留修改但警告
+            extra = ("\n\n另外超出採購限制：\n" + "\n".join(lim_msgs)) if lim_msgs else ""
             messagebox.showwarning("尺寸不足",
-                f"⚠ 鐵板片數不足，無法裁切！\n\n{msg}\n\n請調大板寬或板長。", parent=self)
+                f"⚠ 鐵板片數不足，無法裁切！\n\n{msg}\n\n請調大板寬或板長。{extra}", parent=self)
+        elif lim_msgs:
+            messagebox.showwarning("超出採購限制",
+                f"⚠ {self._spec(row)} 超出採購限制：\n\n" + "\n".join(lim_msgs)
+                + "\n\n請確認此規格是否可採購。", parent=self)
 
     def _debug(self):
         import re
@@ -4444,6 +4490,15 @@ class PurchaseEditWindow(tk.Toplevel):
             messagebox.showerror("無法完成 — 尺寸不足",
                 f"以下項目尺寸不足（紅色底色），無法裁切：\n\n{err_txt}\n\n請調大板寬或板長後再完成。",
                 parent=self)
+            return
+        lims = []
+        for row in self.rows:
+            ms = self._limit_msgs(self._limit_issues(row))
+            if ms:
+                lims.append(f"• {self._spec(row)}：{'；'.join(ms)}")
+        if lims and not messagebox.askyesno(
+                "超出採購限制",
+                "以下項目超出採購限制：\n\n" + "\n".join(lims) + "\n\n確定仍要套用？", parent=self):
             return
         self.parent._purchase_edit_result = self._make_modified_result()
         messagebox.showinfo("完成", "新採購清單已套用！\n可點擊「新預覽」查看結果。", parent=self)
