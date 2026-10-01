@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 BH型鋼鋼板配料系統 GUI
-版本: 23.0  日期: 2026/07
+版本: 23.1  日期: 2026/10
 """
 
 import sys, subprocess, importlib
@@ -2192,7 +2192,7 @@ class PreviewWindow(tk.Toplevel):
 class BHPeilianApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("BH型鋼鋼板配料系統　v23.0")
+        self.title("BH型鋼鋼板配料系統　v23.1")
         self.geometry("1100x780")
         self.minsize(900, 600)   # 強制最小視窗尺寸，避免按鈕列被擠出畫面
         self.configure(bg=CLR_BG)
@@ -2213,9 +2213,9 @@ class BHPeilianApp(tk.Tk):
     def _update_title(self):
         if self._current_file:
             fname = os.path.basename(self._current_file)
-            self.title(f"BH型鋼鋼板配料系統　v23.0　—　{fname}")
+            self.title(f"BH型鋼鋼板配料系統　v23.1　—　{fname}")
         else:
-            self.title("BH型鋼鋼板配料系統　v23.0　—　新檔案")
+            self.title("BH型鋼鋼板配料系統　v23.1　—　新檔案")
 
     # ── 關閉確認 ──────────────────────────────────────────────────
     def _on_close(self):
@@ -2444,7 +2444,7 @@ class BHPeilianApp(tk.Tk):
 
         tk.Label(hdr, text="BH 型鋼鋼板配料系統", bg=CLR_HEADER,
                  fg="white", font=("Microsoft JhengHei", 16, "bold")).pack(side="left", padx=(0,16), pady=8)
-        tk.Label(hdr, text="v23.0", bg=CLR_HEADER,
+        tk.Label(hdr, text="v23.1", bg=CLR_HEADER,
                  fg="#90CDF4", font=("Microsoft JhengHei", 10)).pack(side="right", padx=16)
 
         # 標題下方第二列：開啟進度 / 儲存進度 / 另存新檔
