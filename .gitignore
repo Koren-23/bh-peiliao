@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+
+# 程式自動產生的暫存檔
+_bh_autosave.json
+
+# 系統 / 編輯器
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
