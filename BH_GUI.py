@@ -415,12 +415,13 @@ def _plan_once(by_group, density, new_kerf, new_trim, scrap_kerf, scrap_trim,
                     bw = min(int(math.ceil(need_w*1000/10)*10), bw_max)
                 return bw, bl
 
-            def _best_arrange(remaining):
+            def _best_arrange(remaining, strat):
                 """
                 嘗試數種「板長上限 × 排數」，取 零件面積 ÷ 板面積 最高的排法（同分取排入片數多者）。
-                避免同一張板混排長短差很多的排（板長由最長排決定，短排尾端會大量剩料）。
-                板長上限：最大板長、最長零件單排、最長零件 + 前幾種長度的兩段組合；
-                排數：最多可排數、少 1 排、約一半。
+                策略（每種規格各試一次，取整組總板面積最小者，見 _pack）：
+                  0：板長上限 = 最大板長、最長零件單排、最長零件 + 前 6 種長度；排數 = 最多 / 少 1 / 約一半
+                  2：再加上最長零件 + 前 10 種長度中任兩種的三段組合；排數 1 ~ 最多
+                  4：再加上最長零件 + 最短 6 種長度（兩段、三段組合）；排數 1 ~ 最多（讓短零件與長零件搭配）
                 """
                 cols0 = min(max_cols, len(remaining))
                 L0 = remaining[0]["length"]
@@ -428,13 +429,22 @@ def _plan_once(by_group, density, new_kerf, new_trim, scrap_kerf, scrap_trim,
                 for d in remaining:
                     if d["length"] not in lens:
                         lens.append(d["length"])
-                        if len(lens) >= 6:
-                            break
-                caps = sorted({BL_USE, min(BL_USE, L0 + 2 * new_trim)} |
-                              {min(BL_USE, L0 + L + new_kerf + 2 * new_trim) for L in lens})
+                top = lens[:10 if strat == 2 else 6]
+                capset = {BL_USE, min(BL_USE, L0 + 2 * new_trim)}
+                capset |= {min(BL_USE, L0 + L + new_kerf + 2 * new_trim) for L in top}
+                if strat == 2:
+                    capset |= {min(BL_USE, L0 + L1 + L2 + 2 * new_kerf + 2 * new_trim)
+                               for i, L1 in enumerate(top) for L2 in top[i:]}
+                if strat == 4:
+                    short = sorted(lens)[:6]
+                    capset |= {min(BL_USE, L0 + L + new_kerf + 2 * new_trim) for L in short}
+                    capset |= {min(BL_USE, L0 + L1 + L2 + 2 * new_kerf + 2 * new_trim)
+                               for i, L1 in enumerate(short) for L2 in short[i:]}
+                col_opts = (list(range(1, cols0 + 1)) if strat else
+                            sorted({cols0, max(1, cols0 - 1), max(1, (cols0 + 1) // 2)}))
                 best = None
-                for cap in caps:
-                    for cols in sorted({cols0, max(1, cols0 - 1), max(1, (cols0 + 1) // 2)}):
+                for cap in sorted(capset):
+                    for cols in col_opts:
                         cp, cu = _try_arrange(remaining, cols, cap, new_trim, new_kerf)
                         if not cp:
                             continue
@@ -446,22 +456,43 @@ def _plan_once(by_group, density, new_kerf, new_trim, scrap_kerf, scrap_trim,
                             best = (sc, cols, cp, cu)
                 return best
 
-            while remaining:
-                remaining.sort(key=lambda d: -d["length"])
-                best = _best_arrange(remaining)
-                if best:
-                    _, cols, col_parts, col_used = best
-                else:
-                    cols, col_parts, col_used = 1, None, None
-                placed = [p for cp in col_parts for p in cp] if col_parts else []
+            def _pack(strat):
+                """以某策略模擬整組（同厚度 / 寬度 / 材質）的排列，回傳 (總板面積, 板子清單)；不寫入結果"""
+                rem = list(remaining)
+                boards, area = [], 0
+                while rem:
+                    rem.sort(key=lambda d: -d["length"])
+                    best = _best_arrange(rem, strat)
+                    placed = [p for cp in best[2] for p in cp] if best else []
+                    if not placed:
+                        piece = rem.pop(0)
+                        bw, bl = _board_dims(1, new_trim + piece["length"])
+                        area += bw * bl
+                        boards.append((None, piece))
+                        continue
+                    _, cols, cp, cu = best
+                    for p in placed:
+                        rem.remove(p)
+                    act = [c for c in range(cols) if cp[c]]
+                    bw, bl = _board_dims(len(act), max(cu[c] for c in act))
+                    area += bw * bl
+                    boards.append((cols, cp, cu))
+                return area, boards
 
-                if not placed:
-                    piece = remaining.pop(0)
-                    bl    = piece["length"] + new_trim*2
-                    _add_board(1, bl, [piece], "", None, [new_trim + piece["length"]], [[piece]])
+            # 每種規格分別以數種策略排列，取總板面積最小者（同分取先試的策略）
+            best_pack = None
+            for strat in (0, 2, 4):
+                area, boards = _pack(strat)
+                if best_pack is None or area < best_pack[0]:
+                    best_pack = (area, boards)
+
+            for bd in best_pack[1]:
+                if bd[0] is None:
+                    piece = bd[1]
+                    _add_board(1, piece["length"] + new_trim*2, [piece], "", None,
+                               [new_trim + piece["length"]], [[piece]])
                     continue
-
-                for p in placed: remaining.remove(p)
+                cols, col_parts, col_used = bd
                 used_cols = sum(1 for cp in col_parts if cp)
                 bl = max((col_used[c] for c in range(cols) if col_parts[c]),
                           default=new_trim) + new_trim
@@ -495,7 +526,7 @@ def plan_purchase(parts_list, density, new_kerf, new_trim, scrap_kerf, scrap_tri
     best = None
     best_score = None
     last_better = 0
-    PATIENCE = 100   # 連續 100 次沒有更好的方案就提早結束
+    PATIENCE = 3   # 連續 3 次沒有更好的方案就提早結束（排列為確定性，重複次數不會再改善）
 
     for i in range(iterations):
         if cancel_event is not None and cancel_event.is_set():

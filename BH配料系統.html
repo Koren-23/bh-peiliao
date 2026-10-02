@@ -721,13 +721,31 @@ function planOnce(groups, P, existing_scraps, seed) {
       };
       // 嘗試數種「板長上限 × 排數」，取 零件面積 ÷ 板面積 最高的排法（同分取排入片數多者）；
       // 避免同一張板混排長短差很多的排（板長由最長排決定，短排尾端會大量剩料）
-      var best_arrange = function (remaining) {
+      // 嘗試數種「板長上限 × 排數」，取 零件面積 ÷ 板面積 最高的排法（同分取排入片數多者）
+      // 策略（每種規格各試一次，取整組總板面積最小者，見 pack）：
+      //   0：板長上限 = 最大板長、最長零件單排、最長零件 + 前 6 種長度；排數 = 最多 / 少 1 / 約一半
+      //   2：再加上最長零件 + 前 10 種長度中任兩種的三段組合；排數 1 ~ 最多
+      //   4：再加上最長零件 + 最短 6 種長度（兩段、三段組合）；排數 1 ~ 最多（讓短零件與長零件搭配）
+      var best_arrange = function (remaining, strat) {
         var cols0 = Math.min(max_cols, remaining.length), L0 = remaining[0].length, lens = [];
-        for (var q = 0; q < remaining.length && lens.length < 6; q++) if (lens.indexOf(remaining[q].length) < 0) lens.push(remaining[q].length);
+        for (var q = 0; q < remaining.length; q++) if (lens.indexOf(remaining[q].length) < 0) lens.push(remaining[q].length);
+        var top = lens.slice(0, strat === 2 ? 10 : 6);
         var capSet = [BL_USE, Math.min(BL_USE, L0 + 2 * new_trim)];
-        lens.forEach(function (L) { capSet.push(Math.min(BL_USE, L0 + L + new_kerf + 2 * new_trim)); });
+        top.forEach(function (L) { capSet.push(Math.min(BL_USE, L0 + L + new_kerf + 2 * new_trim)); });
+        var triples = function (arr) {
+          for (var i = 0; i < arr.length; i++) for (var j = i; j < arr.length; j++)
+            capSet.push(Math.min(BL_USE, L0 + arr[i] + arr[j] + 2 * new_kerf + 2 * new_trim));
+        };
+        if (strat === 2) triples(top);
+        if (strat === 4) {
+          var short = lens.slice().sort(function (a, b) { return a - b; }).slice(0, 6);
+          short.forEach(function (L) { capSet.push(Math.min(BL_USE, L0 + L + new_kerf + 2 * new_trim)); });
+          triples(short);
+        }
         var caps = _uniq(capSet).sort(function (a, b) { return a - b; });
-        var colOpts = _uniq([cols0, Math.max(1, cols0 - 1), Math.max(1, Math.floor((cols0 + 1) / 2))]).sort(function (a, b) { return a - b; });
+        var colOpts = [];
+        if (strat) for (var cc = 1; cc <= cols0; cc++) colOpts.push(cc);
+        else colOpts = _uniq([cols0, Math.max(1, cols0 - 1), Math.max(1, Math.floor((cols0 + 1) / 2))]).sort(function (a, b) { return a - b; });
         var best = null;
         caps.forEach(function (cap) {
           colOpts.forEach(function (cols) {
@@ -745,18 +763,42 @@ function planOnce(groups, P, existing_scraps, seed) {
         });
         return best;
       };
-
-      while (remaining.length) {
-        remaining.sort(byLenDesc);
-        var ba = best_arrange(remaining);
-        var colsM = ba ? ba.cols : 1, col_parts = ba ? ba.cp : null, col_used = ba ? ba.cu : null;
-        var placed = col_parts ? [].concat.apply([], col_parts) : [];
-        if (!placed.length) {
-          var piece = remaining.shift();
-          add_board(1, piece.length + new_trim * 2, [piece], "", null, [new_trim + piece.length], [[piece]]);
-          continue;
+      // 以某策略模擬整組（同厚度 / 寬度 / 材質）的排列，回傳 {area: 總板面積, boards}；不寫入結果
+      var pack = function (strat) {
+        var rem = remaining.slice(), boards = [], area = 0;
+        while (rem.length) {
+          rem.sort(byLenDesc);
+          var ba = best_arrange(rem, strat);
+          var placed = ba ? [].concat.apply([], ba.cp) : [];
+          if (!placed.length) {
+            var piece = rem.shift(), d1 = board_dims(1, new_trim + piece.length);
+            area += d1[0] * d1[1];
+            boards.push({piece: piece});
+            continue;
+          }
+          placed.forEach(function (p) { _pyRemove(rem, p); });
+          var um = -Infinity, n = 0;
+          for (var c = 0; c < ba.cols; c++) if (ba.cp[c].length) { n++; um = Math.max(um, ba.cu[c]); }
+          var d2 = board_dims(n, um);
+          area += d2[0] * d2[1];
+          boards.push(ba);
         }
-        placed.forEach(function (p) { _pyRemove(remaining, p); });
+        return {area: area, boards: boards};
+      };
+
+      // 每種規格分別以數種策略排列，取總板面積最小者（同分取先試的策略）
+      var bestPack = null;
+      [0, 2, 4].forEach(function (strat) {
+        var pk = pack(strat);
+        if (!bestPack || pk.area < bestPack.area) bestPack = pk;
+      });
+      bestPack.boards.forEach(function (bd) {
+        if (bd.piece) {
+          add_board(1, bd.piece.length + new_trim * 2, [bd.piece], "", null, [new_trim + bd.piece.length], [[bd.piece]]);
+          return;
+        }
+        var colsM = bd.cols, col_parts = bd.cp, col_used = bd.cu;
+        var placed = [].concat.apply([], col_parts);
         var actives = [];
         for (var c3 = 0; c3 < colsM; c3++) if (col_parts[c3].length) actives.push(c3);
         var used_cols = actives.length;
@@ -767,7 +809,7 @@ function planOnce(groups, P, existing_scraps, seed) {
         add_board(used_cols, bl, placed, "", seg_desc,
                   actives.map(function (c) { return col_used[c]; }),
                   actives.map(function (c) { return col_parts[c]; }));
-      }
+      });
     }
   });
 
@@ -787,7 +829,7 @@ function scoreBetter(s, best) { return !best || s[0] < best[0] || (s[0] === best
 function planPurchase(parts_list, P, existing_scraps, iterations, onProgress) {
   iterations = iterations || 600;
   var groups = buildGroups(parts_list), best = null, bestScore = null, lastBetter = 0;
-  var PATIENCE = 100;   // 連續 100 次沒有更好的方案就提早結束
+  var PATIENCE = 3;   // 連續 3 次沒有更好的方案就提早結束（排列為確定性，重複次數不會再改善）
   for (var i = 0; i < iterations; i++) {
     if (i - lastBetter >= PATIENCE) break;
     var r = planOnce(groups, P, existing_scraps, i), s = scoreOf(r);
