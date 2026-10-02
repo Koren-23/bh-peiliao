@@ -402,13 +402,53 @@ def _plan_once(by_group, density, new_kerf, new_trim, scrap_kerf, scrap_trim,
 
                 return col_parts, col_used
 
+            def _board_dims(n, used_max):
+                """n 排、最長一排已用 used_max 時的實際板寬 / 板長（與 _add_board 相同的限制與補寬規則）"""
+                bw = min(max(n * width + (n - 1) * new_kerf + new_trim * 2, bw_min), bw_max)
+                bl = min(max(used_max + new_trim, bl_min), bl_max)
+                if calc_weight(bw, thick, bl, density) < w_min:
+                    need_w = w_min / (thick/1000 * bl/1000 * density * 1000)
+                    bw = min(int(math.ceil(need_w*1000/10)*10), bw_max)
+                return bw, bl
+
+            def _best_arrange(remaining):
+                """
+                嘗試數種「板長上限 × 排數」，取 零件面積 ÷ 板面積 最高的排法（同分取排入片數多者）。
+                避免同一張板混排長短差很多的排（板長由最長排決定，短排尾端會大量剩料）。
+                板長上限：最大板長、最長零件單排、最長零件 + 前幾種長度的兩段組合；
+                排數：最多可排數、少 1 排、約一半。
+                """
+                cols0 = min(max_cols, len(remaining))
+                L0 = remaining[0]["length"]
+                lens = []
+                for d in remaining:
+                    if d["length"] not in lens:
+                        lens.append(d["length"])
+                        if len(lens) >= 6:
+                            break
+                caps = sorted({BL_USE, min(BL_USE, L0 + 2 * new_trim)} |
+                              {min(BL_USE, L0 + L + new_kerf + 2 * new_trim) for L in lens})
+                best = None
+                for cap in caps:
+                    for cols in sorted({cols0, max(1, cols0 - 1), max(1, (cols0 + 1) // 2)}):
+                        cp, cu = _try_arrange(remaining, cols, cap, new_trim, new_kerf)
+                        if not cp:
+                            continue
+                        act = [c for c in range(cols) if cp[c]]
+                        area = sum(p["length"] for c in act for p in cp[c]) * width
+                        bw, bl = _board_dims(len(act), max(cu[c] for c in act))
+                        sc = (area / (bw * bl), sum(len(cp[c]) for c in act))
+                        if best is None or sc > best[0]:
+                            best = (sc, cols, cp, cu)
+                return best
+
             while remaining:
                 remaining.sort(key=lambda d: -d["length"])
-                cols = min(max_cols, len(remaining))
-
-                # 先試一次排列，若完全塞不下任何東西才單獨處理最長的
-                col_parts, col_used = _try_arrange(remaining, cols, BL_USE,
-                                                    new_trim, new_kerf)
+                best = _best_arrange(remaining)
+                if best:
+                    _, cols, col_parts, col_used = best
+                else:
+                    cols, col_parts, col_used = 1, None, None
                 placed = [p for cp in col_parts for p in cp] if col_parts else []
 
                 if not placed:
@@ -450,10 +490,14 @@ def plan_purchase(parts_list, density, new_kerf, new_trim, scrap_kerf, scrap_tri
 
     best = None
     best_score = None
+    last_better = 0
+    PATIENCE = 100   # 連續 100 次沒有更好的方案就提早結束
 
     for i in range(iterations):
         if cancel_event is not None and cancel_event.is_set():
             return None
+        if i - last_better >= PATIENCE:
+            break
         result = _plan_once(by_group, density, new_kerf, new_trim,
                             scrap_kerf, scrap_trim, existing_scraps, seed=i,
                             bw_min=bw_min, bw_max=bw_max,
@@ -467,9 +511,12 @@ def plan_purchase(parts_list, density, new_kerf, new_trim, scrap_kerf, scrap_tri
         if best_score is None or score < best_score:
             best_score = score
             best = result
+            last_better = i
         if progress_callback and (i % 5 == 0 or i + 1 == iterations):
             progress_callback(i + 1, iterations)
 
+    if progress_callback:
+        progress_callback(iterations, iterations)
     return best
 
 

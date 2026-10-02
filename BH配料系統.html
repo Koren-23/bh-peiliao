@@ -652,7 +652,8 @@ function planOnce(groups, P, existing_scraps, seed) {
     } else {
       // 多段切割：長度方向分段排入，充分利用板長
       var BL_USE = bl_max;
-      var try_arrange = function (pieces, cols) {
+      var try_arrange = function (pieces, cols, cap) {
+        if (cap === undefined) cap = BL_USE;
         var col_used = [], col_parts = [], c;
         for (c = 0; c < cols; c++) { col_used.push(new_trim); col_parts.push([]); }
         pieces.slice().sort(byLenDesc).forEach(function (piece) {
@@ -660,7 +661,7 @@ function planOnce(groups, P, existing_scraps, seed) {
           for (var c2 = 0; c2 < cols; c2++) {
             var gap = col_parts[c2].length ? new_kerf : 0;
             var nu = col_used[c2] + gap + piece.length + new_trim;
-            if (nu <= BL_USE && nu < best_used) { best_c = c2; best_used = nu; }
+            if (nu <= cap && nu < best_used) { best_c = c2; best_used = nu; }
           }
           if (best_c !== null) {
             var gap2 = col_parts[best_c].length ? new_kerf : 0;
@@ -685,7 +686,7 @@ function planOnce(groups, P, existing_scraps, seed) {
                   var ncb = new_trim;
                   for (k = 0; k < col_parts[cb].length; k++) { pp = k === ib ? pa : col_parts[cb][k]; ncb += (k > 0 ? new_kerf : 0) + pp.length; }
                   ncb += new_trim;
-                  if (nca <= BL_USE && ncb <= BL_USE) {
+                  if (nca <= cap && ncb <= cap) {
                     var old_max = Math.max(col_used[ca], col_used[cb]);
                     var new_max = Math.max(nca - new_trim, ncb - new_trim);
                     if (new_max < old_max) {
@@ -702,10 +703,47 @@ function planOnce(groups, P, existing_scraps, seed) {
         return [col_parts, col_used];
       };
 
+      // n 排、最長一排已用 used_max 時的實際板寬 / 板長（與 add_board 相同的限制與補寬規則）
+      var board_dims = function (n, used_max) {
+        var bw = Math.min(Math.max(n * width + (n - 1) * new_kerf + new_trim * 2, bw_min), bw_max);
+        var bl = Math.min(Math.max(used_max + new_trim, bl_min), bl_max);
+        if (calcWeight(bw, thick, bl, density) < w_min) {
+          var need_w = w_min / (thick / 1000 * bl / 1000 * density * 1000);
+          bw = Math.min(Math.trunc(Math.ceil(need_w * 1000 / 10) * 10), bw_max);
+        }
+        return [bw, bl];
+      };
+      // 嘗試數種「板長上限 × 排數」，取 零件面積 ÷ 板面積 最高的排法（同分取排入片數多者）；
+      // 避免同一張板混排長短差很多的排（板長由最長排決定，短排尾端會大量剩料）
+      var best_arrange = function (remaining) {
+        var cols0 = Math.min(max_cols, remaining.length), L0 = remaining[0].length, lens = [];
+        for (var q = 0; q < remaining.length && lens.length < 6; q++) if (lens.indexOf(remaining[q].length) < 0) lens.push(remaining[q].length);
+        var capSet = [BL_USE, Math.min(BL_USE, L0 + 2 * new_trim)];
+        lens.forEach(function (L) { capSet.push(Math.min(BL_USE, L0 + L + new_kerf + 2 * new_trim)); });
+        var caps = _uniq(capSet).sort(function (a, b) { return a - b; });
+        var colOpts = _uniq([cols0, Math.max(1, cols0 - 1), Math.max(1, Math.floor((cols0 + 1) / 2))]).sort(function (a, b) { return a - b; });
+        var best = null;
+        caps.forEach(function (cap) {
+          colOpts.forEach(function (cols) {
+            var ar = try_arrange(remaining, cols, cap), cp = ar[0], cu = ar[1];
+            if (!cp) return;
+            var act = [], area = 0, cnt = 0, um = -Infinity;
+            for (var c = 0; c < cols; c++) if (cp[c].length) {
+              act.push(c); cnt += cp[c].length; um = Math.max(um, cu[c]);
+              cp[c].forEach(function (p) { area += p.length; });
+            }
+            if (!act.length) return;
+            var d = board_dims(act.length, um), sc = [area * width / (d[0] * d[1]), cnt];
+            if (!best || sc[0] > best.sc[0] || (sc[0] === best.sc[0] && sc[1] > best.sc[1])) best = {sc: sc, cols: cols, cp: cp, cu: cu};
+          });
+        });
+        return best;
+      };
+
       while (remaining.length) {
         remaining.sort(byLenDesc);
-        var colsM = Math.min(max_cols, remaining.length);
-        var arr = try_arrange(remaining, colsM), col_parts = arr[0], col_used = arr[1];
+        var ba = best_arrange(remaining);
+        var colsM = ba ? ba.cols : 1, col_parts = ba ? ba.cp : null, col_used = ba ? ba.cu : null;
         var placed = col_parts ? [].concat.apply([], col_parts) : [];
         if (!placed.length) {
           var piece = remaining.shift();
@@ -742,12 +780,15 @@ function scoreBetter(s, best) { return !best || s[0] < best[0] || (s[0] === best
 /* 跑 iterations 次隨機配料，取「採購總重最輕 + 餘料最少」的最佳方案（對應 Python plan_purchase） */
 function planPurchase(parts_list, P, existing_scraps, iterations, onProgress) {
   iterations = iterations || 600;
-  var groups = buildGroups(parts_list), best = null, bestScore = null;
+  var groups = buildGroups(parts_list), best = null, bestScore = null, lastBetter = 0;
+  var PATIENCE = 100;   // 連續 100 次沒有更好的方案就提早結束
   for (var i = 0; i < iterations; i++) {
+    if (i - lastBetter >= PATIENCE) break;
     var r = planOnce(groups, P, existing_scraps, i), s = scoreOf(r);
-    if (scoreBetter(s, bestScore)) { bestScore = s; best = r; }
+    if (scoreBetter(s, bestScore)) { bestScore = s; best = r; lastBetter = i; }
     if (onProgress && (i % 5 === 0 || i + 1 === iterations)) onProgress(i + 1, iterations);
   }
+  if (onProgress) onProgress(iterations, iterations);
   return best;
 }
 </script>
