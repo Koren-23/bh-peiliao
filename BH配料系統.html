@@ -74,6 +74,16 @@ button{font-family:inherit}
 .sides .btn{width:100%;justify-content:center;padding:7px 6px;font-size:13.5px}
 .side-title{color:#fff;font-weight:700;text-align:center;font-size:13px;padding:4px 0 2px;border-bottom:1px solid rgba(255,255,255,.3);margin-bottom:2px}
 .side-title.ghost{visibility:hidden}
+/* 採購修正提示 */
+.pe-banner{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;margin:10px 12px 0;padding:9px 12px;border-radius:8px;
+  background:#FFF7E6;border:1px solid #F6AD55;border-left:6px solid #DD6B20;color:#7B341E;font-size:13.5px}
+.pe-banner[hidden]{display:none}
+.pe-b-title{font-weight:700;color:#9C4221}
+.pe-b-chg{background:#fff;border:1px solid #FBD38D;border-radius:5px;padding:1px 7px;font-size:12.5px}
+.pe-b-hint{font-size:12px;color:#9C4221}
+.pe-badge{display:block;margin-top:2px;color:#DD6B20;font-size:11.5px}
+.pe-badge[hidden]{display:none}
+.pe-note{background:#FFF7E6;border:1px solid #F6AD55;border-left:5px solid #DD6B20;color:#7B341E;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-weight:700;font-size:13.5px}
 /* 側欄按鈕配色：柔和低飽和，同功能左右呼應 */
 .sb-imp{--c:#5A7184} .sb-pe{--c:#A65C72} .sb-exp{--c:#7B68B5} .sb-exp2{--c:#96603A}
 .sb-pv{--c:#44797A} .sb-pv2{--c:#5B7A99} .sb-blank{--c:#8A6A42}
@@ -217,6 +227,7 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
 
 <div class="app-main">
   <section class="workspace">
+    <div id="peBanner" class="pe-banner" role="status" hidden></div>
     <nav class="tabs" role="tablist">
       <button class="tab" role="tab" data-tab="param" aria-selected="true">① 前置參數</button>
       <button class="tab" role="tab" data-tab="bh" aria-selected="false">② BH配料表 <span id="bhBadge" class="count"></span></button>
@@ -303,7 +314,7 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
       <button class="btn sb-imp" data-act="importSc">📂 餘料CSV</button>
     </div>
     <div class="cell b">
-      <div class="side-title">採購修正</div>
+      <div class="side-title">採購修正<span id="peBadge" class="pe-badge" hidden></span></div>
       <button class="btn sb-pe" data-act="peOpen">📋 新採購清單</button>
     </div>
     <!-- 第 2 列：匯出（左欄上方為「配料結果」標題，右欄放同高的隱藏標題以對齊） -->
@@ -1545,7 +1556,7 @@ async function runCalc() {
     purchase_list: res.purchase_list, cut_details: res.cut_details, new_scraps: res.new_scraps,
     existing_scraps: scraps, used_scrap_ids: new Set(res.used_scrap_ids),
   };
-  S.peRows = null; S.peResult = null;
+  S.peRows = null; S.peResult = null; updatePeBanner();
   const total_buy = sum(res.purchase_list, p => p.total_wt);
   setStatus(`計算完成｜採購 ${res.purchase_list.length} 片，${fmtInt(total_buy)} kg｜切割 ${res.cut_details.length} 次｜餘料 ${res.new_scraps.length} 件`);
   const ans = await dialog({
@@ -1561,7 +1572,7 @@ function cancelCalc() {
 }
 async function clearAll() {
   if (!await askYesNo("確認", "確定要清除所有資料？")) return;
-  S.bh = []; S.sc = []; S.result = null; S.peRows = null; S.peResult = null;
+  S.bh = []; S.sc = []; S.result = null; S.peRows = null; S.peResult = null; updatePeBanner();
   renderBh(); renderSc(); markDirty();
   setStatus("已清除全部資料。");
 }
@@ -1920,7 +1931,9 @@ function openPreview(r, titleSuffix) {
 
   tabs["採購清單"] = () => {
     const merged = mergePurchase(r.purchase_list);
-    const rows = merged.map((v, i) => ({cls: zebra(i), cells: [i + 1, v.spec, v.qty, v.mat, v.unit_wt, Math.round(v.total_wt)]}));
+    const adjusted = new Set(r.cut_details.filter(c => c.pe_orig).map(c => c.board_spec + "|" + c.mat));
+    const rows = merged.map((v, i) => { const chg = adjusted.has(v.spec + "|" + v.mat);
+      return {cls: chg ? "changed" : zebra(i), cells: [i + 1, v.spec + (chg ? "（已調整）" : ""), v.qty, v.mat, v.unit_wt, Math.round(v.total_wt)]}; });
     rows.push({cls: "tot", cells: ["", `採購合計：共 ${sum(merged, v => v.qty)} 片`, "", "", "總重(kg)：", fmtInt(sum(merged, v => v.total_wt))]});
     return gridHTML(["NO", "採購規格(mm)", "數量", "材質", "單片重(kg)", "總重(kg)"], rows);
   };
@@ -1931,9 +1944,9 @@ function openPreview(r, titleSuffix) {
       ${hasLayouts ? `<button class="btn btn-teal btn-sm" data-a="layoutList">📐 排列圖清單（批次下載 / 合併PDF）</button>` : ""}</div>` +
       gridHTML(["", "片次", "板別", "採購規格(mm)", "材質", "板重(kg)", "構件（裁切尺寸）", "數量", "單重(kg)", "餘料"],
         r.cut_details.map((ct, i) => ({
-          cls: (ct.is_scrap ? "scrap" : zebra(i)) + " clickable", attrs: `data-ct="${i}"`, left: [6, 9],
+          cls: (ct.is_scrap ? "scrap" : ct.pe_orig ? "changed" : zebra(i)) + " clickable", attrs: `data-ct="${i}"`, left: [6, 9],
           cells: [ct.layout ? {html: `<button class="btn btn-teal btn-sm" data-ct-open="${i}" title="查看排列圖">📐</button>`} : "",
-                  ct.idx, typeLabel(ct.type), ct.board_spec, ct.mat, ct.board_wt,
+                  ct.idx, typeLabel(ct.type), ct.board_spec + (ct.pe_orig ? `（原 ${ct.pe_orig.split("×").slice(1).join("×")}）` : ""), ct.mat, ct.board_wt,
                   `${ct.comp}（${ct.part_spec}）`, ct.qty, fmtF(ct.unit_wt), ct.leftover]
         })));
   };
@@ -1973,10 +1986,11 @@ function openPreview(r, titleSuffix) {
       gridHTML(["片次", "材質", "板規格", "排數", "需要尺寸", "加大原因", "板重(kg)", "零件(kg)", "利用率", "損耗(kg)", "餘料(kg)"], det);
   };
 
-  const names = Object.keys(tabs);
+  const names = Object.keys(tabs), peCh = peChangeSummary(r);
   const m = openModal({
     title: "配料結果預覽" + (titleSuffix || ""), size: "xl",
-    bodyHTML: `<div class="ptabs" role="tablist">${names.map((n, i) => `<button class="ptab" role="tab" data-t="${i}" aria-selected="${i === 0}">${n}</button>`).join("")}</div><div class="pbody"></div>`
+    bodyHTML: (peCh.length ? `<div class="pe-note">✏️ 本結果含採購修正：調整 ${peCh.reduce((a, c) => a + c.n, 0)} 片鐵板（採購清單、切割明細以綠底標示，規格後註明原尺寸）</div>` : "") +
+      `<div class="ptabs" role="tablist">${names.map((n, i) => `<button class="ptab" role="tab" data-t="${i}" aria-selected="${i === 0}">${n}</button>`).join("")}</div><div class="pbody"></div>`
   });
   const pbody = $(".pbody", m.body);
   const show = i => {
@@ -2668,6 +2682,30 @@ function checkSize(r, row) {
   });
   return errors.length ? [false, _uniq(errors).join("；")] : [true, ""];
 }
+/* 採購修正後有調整尺寸的鐵板：[{mat, from, to, n}]，依片次順序 */
+function peChangeSummary(r) {
+  const m = new Map();
+  ((r && r.cut_details) || []).forEach(ct => {
+    if (!ct.pe_orig) return;
+    const k = JSON.stringify([ct.mat || "", ct.pe_orig, ct.board_spec]);
+    if (!m.has(k)) m.set(k, {mat: ct.mat || "", from: ct.pe_orig, to: ct.board_spec, n: 0});
+    m.get(k).n++;
+  });
+  return [...m.values()];
+}
+/* 採購修正有調整鐵板尺寸時，在主畫面顯示提示列，並在側欄「採購修正」標題顯示片數 */
+function updatePeBanner() {
+  const ch = peChangeSummary(S.peResult), el = $("#peBanner"), badge = $("#peBadge");
+  if (!ch.length) { el.hidden = true; badge.hidden = true; return; }
+  const n = ch.reduce((a, c) => a + c.n, 0);
+  el.innerHTML = `<span class="pe-b-title">✏️ 採購修正已套用：調整 ${n} 片鐵板</span>` +
+    ch.slice(0, 3).map(c => `<span class="pe-b-chg">${esc(c.mat)} ${esc(c.from)} → <b>${esc(c.to)}</b> ×${c.n}</span>`).join("") +
+    (ch.length > 3 ? `<span>…等 ${ch.length} 種規格</span>` : "") +
+    `<span class="grow"></span><span class="pe-b-hint">匯出請使用右側「採購修正」欄</span>` +
+    `<button class="btn btn-sm" style="--c:#DD6B20" data-act="newPreview">🔍 查看新預覽</button>`;
+  el.hidden = false;
+  badge.textContent = `● 已修正 ${n} 片`; badge.hidden = false;
+}
 function makeModifiedResult(base, rows) {
   const r = structuredClone(base);
   const density = r.params.density;
@@ -2682,8 +2720,9 @@ function makeModifiedResult(base, rows) {
   r.cut_details.forEach(ct => {
     const row = ct.is_scrap || !ct.layout ? null : rowOf(ct);
     if (!row) { keepOld(ct); return; }
-    const L = ct.layout, nbw = row.width, nbl = row.length;
+    const L = ct.layout, nbw = row.width, nbl = row.length, origSpec = ct.board_spec;
     ct.board_spec = peSpec(row);
+    if (ct.board_spec !== origSpec) ct.pe_orig = origSpec;   // 有調整尺寸：記錄原規格，供主畫面提示與預覽標示
     ct.board_wt = Math.trunc(calcWeight(nbw, row.thick, nbl, density));
     // 與配料計算相同算法重算餘料；排列圖跟著修改後尺寸更新
     L.board_w = nbw; L.board_l = nbl;
@@ -2784,7 +2823,7 @@ function openPurchaseEdit() {
   host.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("input[data-k]")) e.target.blur(); });
   m.foot.addEventListener("click", async e => {
     const a = e.target.closest("button")?.dataset.a;
-    if (a === "reset") { S.peRows = buildPeRows(r); S.peResult = null; refresh(); setStatus("新採購清單已重設為原始採購清單。"); }
+    if (a === "reset") { S.peRows = buildPeRows(r); S.peResult = null; updatePeBanner(); refresh(); setStatus("新採購清單已重設為原始採購清單。"); }
     if (a === "debug") {
       let t = "=== 診斷報告 ===\n\npurchase_list rows:\n";
       S.peRows.forEach(row => { t += `  orig=${row.orig_spec} cur_w=${row.width} cur_l=${row.length}\n`; });
@@ -2810,6 +2849,7 @@ function openPurchaseEdit() {
         limRows.forEach(peIgnore); refresh();
       }
       S.peResult = makeModifiedResult(r, S.peRows);
+      updatePeBanner();
       m.close();
       showOk("完成", "新採購清單已套用！\n可點擊「新預覽」查看結果。");
       setStatus("新採購清單已套用。");

@@ -1250,6 +1250,16 @@ def loss_analysis(r, only=None):
     return {"rows": rows, "total": total}
 
 
+def pe_change_summary(r):
+    """採購修正後有調整尺寸的鐵板：[(材質, 原規格, 新規格, 片數)]，依片次順序"""
+    out = {}
+    for ct in (r or {}).get("cut_details", []):
+        if ct.get("pe_orig"):
+            k = (ct.get("mat", ""), ct["pe_orig"], ct["board_spec"])
+            out[k] = out.get(k, 0) + 1
+    return [(m_, o_, n_, c_) for (m_, o_, n_), c_ in out.items()]
+
+
 def has_enlarge_reason(x):
     """損耗分析明細列是否有加大原因（不含「使用現有餘料」）"""
     return x["reasons"] not in ("—", "使用現有餘料")
@@ -2403,6 +2413,13 @@ class PreviewWindow(tk.Toplevel):
         self.resizable(True, True)  # 可自由拉伸放大縮小
         self.configure(bg=CLR_BG)
         r = result
+        ch = pe_change_summary(r)
+        if ch:
+            tk.Label(self, text=f"✏️ 本結果含採購修正：調整 {sum(c for *_, c in ch)} 片鐵板"
+                                "（採購清單、切割明細以綠底標示，規格後註明原尺寸）",
+                     bg="#FFF7E6", fg="#7B341E", anchor="w", font=("Microsoft JhengHei", 10, "bold"),
+                     highlightbackground="#DD6B20", highlightthickness=2
+                     ).pack(fill="x", padx=6, pady=(6, 0), ipady=4)
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=6, pady=6)
 
@@ -2444,6 +2461,7 @@ class PreviewWindow(tk.Toplevel):
         tree.tag_configure("scrap", background=CLR_SCRAP)
         tree.tag_configure("comp",  background="#D6EAF8")
         tree.tag_configure("unused",background="#FFF3CD")
+        tree.tag_configure("pechg", background="#C6EFCE")   # 採購修正有調整尺寸
         tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
@@ -2622,10 +2640,12 @@ class PreviewWindow(tk.Toplevel):
             merged[key]["total_wt"] += p["total_wt"]
         total = 0
         total_qty = 0
+        adjusted = {(c["board_spec"], c.get("mat")) for c in r["cut_details"] if c.get("pe_orig")}
         for i, ((spec, mat, unit_wt), val) in enumerate(merged.items()):
-            tree.insert("","end", values=(i+1, spec, val["qty"], mat,
+            chg = (spec, mat) in adjusted
+            tree.insert("","end", values=(i+1, spec + ("（已調整）" if chg else ""), val["qty"], mat,
                         unit_wt, round(val["total_wt"],0)),
-                        tags=("odd" if i%2==0 else "even",))
+                        tags=("pechg" if chg else "odd" if i%2==0 else "even",))
             total     += val["total_wt"]
             total_qty += val["qty"]
         tree.insert("","end",
@@ -2639,12 +2659,16 @@ class PreviewWindow(tk.Toplevel):
         tip.pack(anchor="w", padx=6, pady=(2,0))
 
         cols = ("片次","板別","採購規格(mm)","材質","板重(kg)","構件（裁切尺寸）","數量","單重(kg)","餘料")
-        tree = self._make_tree(frame, cols, [55,65,180,55,75,220,50,75,220])
+        has_pe = any(c.get("pe_orig") for c in r["cut_details"])   # 有採購修正時規格欄加寬，容納「（原 …）」
+        tree = self._make_tree(frame, cols, [55,65,300 if has_pe else 180,55,75,220,50,75,220])
         self._layout_map = {}
         for i, ct in enumerate(r["cut_details"]):
-            tag = "scrap" if ct["is_scrap"] else ("odd" if i%2==0 else "even")
+            tag = "scrap" if ct["is_scrap"] else "pechg" if ct.get("pe_orig") else ("odd" if i%2==0 else "even")
+            spec = ct["board_spec"]
+            if ct.get("pe_orig"):
+                spec += "（原 " + ct["pe_orig"].split("×", 1)[1] + "）"
             item = tree.insert("","end", values=(ct["idx"],"F=翼" if ct["type"]=="F" else "W=腹",
-                        ct["board_spec"],ct["mat"],ct["board_wt"],
+                        spec,ct["mat"],ct["board_wt"],
                         f'{ct["comp"]}（{ct["part_spec"]}）',
                         ct["qty"],ct["unit_wt"],ct["leftover"]), tags=(tag,))
             if ct.get("layout"):
@@ -3172,6 +3196,8 @@ class BHPeilianApp(tk.Tk):
         btn(f, "📂 餘料CSV", self._sc_import_csv, "#5A7184", "#485B6B")
         f = cell(0, 1)
         head(f, "採購修正")
+        self._pe_badge = tk.Label(f, text="", bg=f.cget("bg"), fg="#DD6B20", font=("Microsoft JhengHei", 9, "bold"))
+        self._pe_badge.pack()
         btn(f, "📋 新採購清單", self._open_purchase_edit, "#A65C72", "#8A4A5E")
 
         # 第 1 列：匯出（左欄上方為「配料結果」標題，右欄放同高的隱藏標題以對齊）
@@ -3229,6 +3255,16 @@ class BHPeilianApp(tk.Tk):
         # 主體使用 Notebook（最後 pack，自動吃掉「剩餘」空間，不會擠掉上面已保留的區塊）
         nb = ttk.Notebook(self)
         nb.pack(side="top", fill="both", expand=True, padx=10, pady=(6,0))
+        self._main_nb = nb
+
+        # 採購修正提示列：有調整鐵板尺寸時顯示在 Notebook 上方
+        self._pe_banner = tk.Frame(self, bg="#FFF7E6", highlightbackground="#DD6B20", highlightthickness=2)
+        self._pe_banner_lbl = tk.Label(self._pe_banner, text="", bg="#FFF7E6", fg="#7B341E", justify="left",
+                                       anchor="w", font=("Microsoft JhengHei", 10))
+        self._pe_banner_lbl.pack(side="left", fill="x", expand=True, padx=10, pady=6)
+        tk.Button(self._pe_banner, text="🔍 查看新預覽", command=self._new_preview_result,
+                  bg="#DD6B20", fg="white", font=("Microsoft JhengHei", 10, "bold"),
+                  relief="flat", padx=10, pady=3, cursor="hand2").pack(side="right", padx=8, pady=6)
 
         self.tab_param  = ttk.Frame(nb)
         self.tab_bh     = ttk.Frame(nb)
@@ -3846,6 +3882,7 @@ class BHPeilianApp(tk.Tk):
             }
             self._purchase_edit_rows   = None
             self._purchase_edit_result = None
+            self._update_pe_banner()
             total_buy = sum(p["total_wt"] for p in purchase_list)
             msg = (f"✅ 計算完成！\n\n"
                    f"  BH 構件：{len(bh_rows)} 項\n"
@@ -4552,7 +4589,26 @@ class BHPeilianApp(tk.Tk):
         for item in self.sc_tree.get_children():
             self.sc_tree.delete(item)
         self._result = None
+        self._purchase_edit_rows   = None
+        self._purchase_edit_result = None
+        self._update_pe_banner()
         self.status_var.set("已清除全部資料。")
+
+    def _update_pe_banner(self):
+        """採購修正有調整鐵板尺寸時，在主畫面顯示提示列，並在側欄「採購修正」標題下顯示片數"""
+        ch = pe_change_summary(getattr(self, "_purchase_edit_result", None))
+        if not ch:
+            self._pe_banner.pack_forget()
+            self._pe_badge.config(text="")
+            return
+        n = sum(c for *_, c in ch)
+        lines = [f"✏️ 採購修正已套用：調整 {n} 片鐵板　（匯出請使用右側「採購修正」欄）"]
+        lines += [f"　　{m_} {o_} → {n_} ×{c_}" for m_, o_, n_, c_ in ch[:3]]
+        if len(ch) > 3:
+            lines.append(f"　　…等 {len(ch)} 種規格")
+        self._pe_banner_lbl.config(text="\n".join(lines))
+        self._pe_banner.pack(side="top", fill="x", padx=10, pady=(6, 0), before=self._main_nb)
+        self._pe_badge.config(text=f"● 已修正 {n} 片")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -5044,6 +5100,8 @@ class PurchaseEditWindow(tk.Toplevel):
         # 清除主視窗記憶
         self.parent._purchase_edit_rows   = None
         self.parent._purchase_edit_result = None
+        if hasattr(self.parent, "_update_pe_banner"):
+            self.parent._update_pe_banner()
         self.rows = self._build_rows()
         self._refresh()
 
@@ -5078,6 +5136,8 @@ class PurchaseEditWindow(tk.Toplevel):
                 self._ignore(row)
             self._refresh()
         self.parent._purchase_edit_result = self._make_modified_result()
+        if hasattr(self.parent, "_update_pe_banner"):
+            self.parent._update_pe_banner()
         messagebox.showinfo("完成", "新採購清單已套用！\n可點擊「新預覽」查看結果。", parent=self)
         self.destroy()
 
@@ -5148,7 +5208,10 @@ class PurchaseEditWindow(tk.Toplevel):
                 keep_old(ct)
                 continue
             new_bw, new_bl = row["width"], row["length"]
+            orig_spec = ct["board_spec"]
             ct["board_spec"] = self._spec(row)
+            if ct["board_spec"] != orig_spec:
+                ct["pe_orig"] = orig_spec   # 有調整尺寸：記錄原規格，供主畫面提示與預覽標示
             ct["board_wt"]   = int(calc_weight(new_bw, row["thick"], new_bl, density))
             # 與配料計算相同算法重算餘料；排列圖跟著修改後尺寸更新
             layout["board_w"] = new_bw
