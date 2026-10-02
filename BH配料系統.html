@@ -163,6 +163,12 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
 .lv-legend .sw{display:inline-block;width:18px;height:18px;border-radius:3px;vertical-align:middle;margin-right:5px}
 .lv-canvas{flex:1;min-height:200px;overflow:auto;background:#fff;border:1px solid #999;border-radius:6px}
 .lv-canvas canvas{display:block}
+/* 加大原因板一覽 */
+.rg-list{flex:1;min-height:0;overflow:auto;padding:2px}
+.rg-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:10px}
+.rg-title{font-weight:700;color:var(--navy);font-size:14px}
+.rg-reason{color:#B45309;font-size:13px;margin:2px 0 6px}
+.rg-card canvas{display:block;cursor:zoom-in}
 .zoom{display:flex;align-items:center;gap:4px;margin-left:auto}
 .zoom span{min-width:46px;text-align:center;font-size:13px}
 
@@ -1599,7 +1605,7 @@ const LOSS_CATS = [
   ["edit",    "採購修正調整",    "採購修正手動改變板寬 / 板長造成的增減"],
   ["stock",   "現有餘料板剩餘",  "使用現有餘料時，餘料板未用到的部分"],
 ];
-function lossAnalysis(r) {
+function lossAnalysis(r, only) {   // only：只分析這些片次（Set）；省略為全部
   const p = r.params, dens = p.density, lim = (k, d) => (typeof p[k] === "number" ? p[k] : d);
   const bw_min = lim("bw_min", BW_MIN), bw_max = lim("bw_max", BW_MAX), bl_min = lim("bl_min", BL_MIN), bl_max = lim("bl_max", BL_MAX);
   const w_min = lim("w_min", W_MIN), w_max = lim("w_max", W_MAX);
@@ -1609,7 +1615,7 @@ function lossAnalysis(r) {
   (r.new_scraps || []).forEach(s => scrapOf.set(s.src, (scrapOf.get(s.src) || 0) + s.wt));
   const rows = [], n0 = v => v.toLocaleString("en-US");
   r.cut_details.forEach(ct => {
-    const L = ct.layout; if (!L) return;
+    const L = ct.layout; if (!L || (only && !only.has(ct.idx))) return;
     const t = L.thick, pw = L.part_w, tr = L.trim, kf = L.kerf, bw = L.board_w, bl = L.board_l, n = L.rows.length;
     const used = L.rows.map(rw => layoutRowUsed(L, rw));
     const need_w = n * pw + (n - 1) * kf + tr * 2, need_l = Math.max(...used) + tr;
@@ -1650,9 +1656,9 @@ function lossAnalysis(r) {
   });
   return {rows, total};
 }
-async function exportLossXlsx(r, title) {
+async function exportLossXlsx(r, title, only, fileBase) {   // only：只輸出這些片次（Set）
   await loadLib("exceljs");
-  const a = lossAnalysis(r), tot = a.total, p = r.params, wb = new ExcelJS.Workbook();
+  const a = lossAnalysis(r, only), tot = a.total, p = r.params, wb = new ExcelJS.Workbook();
   const thin = {style: "thin", color: {argb: "FFA0AEC0"}}, bd = {left: thin, right: thin, top: thin, bottom: thin};
   const table = (ws, start, head, data, widths, pctCols) => {   // pctCols：百分比欄（1 起算）
     head.forEach((h, c) => {
@@ -1685,8 +1691,84 @@ async function exportLossXlsx(r, title) {
         [8, 10, 22, 6, 16, 48, 11, 11, 8, 11, 11, ...LOSS_CATS.map(() => 12)], [9]);
   ws2.views = [{state: "frozen", xSplit: 1, ySplit: 1}];
   const buf = await wb.xlsx.writeBuffer();
-  download(new Blob([buf], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), `BH_損耗分析_${stamp()}.xlsx`);
-  showOk("匯出完成", "已匯出損耗分析（損耗總表 + 每片明細）。");
+  download(new Blob([buf], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), `${fileBase || "BH_損耗分析"}_${stamp()}.xlsx`);
+  showOk("匯出完成", `已匯出${only ? "加大原因板明細" : "損耗分析"}（損耗總表 + 每片明細）。`);
+}
+/* 損耗分析明細列是否有加大原因（不含「使用現有餘料」） */
+const hasEnlargeReason = x => x.reasons !== "—" && x.reasons !== "使用現有餘料";
+/* 加大原因板的標題文字 */
+const reasonCaption = x => [`片次 ${x.idx}　${x.spec}　${x.mat}　利用率 ${(x.util * 100).toFixed(1)}%　損耗 ${fmtInt(x.board - x.parts)} kg　餘料 ${fmtInt(x.scrap)} kg`,
+                             "加大原因：" + x.reasons];
+/* 排列圖上方加標題文字（第一行為片次 / 規格，其餘為加大原因） */
+function captionCanvas(L, lines, zoom, pxRatio) {
+  const base = layoutCanvas(L, zoom, pxRatio), HDR = 26 * lines.length + 14, w = base.w, h = base.h + HDR;
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(w * pxRatio); cv.height = Math.round(h * pxRatio);
+  const ctx = cv.getContext("2d");
+  ctx.scale(pxRatio, pxRatio);
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+  ctx.textBaseline = "top";
+  lines.forEach((t, i) => {
+    ctx.font = `${i ? "" : "bold "}${i ? 15 * LV_FONT_K : 18 * LV_FONT_K}px ${LV_FONT}`;
+    ctx.fillStyle = i ? "#B45309" : "#1A3050";
+    ctx.fillText(t, 16, 8 + i * 26);
+  });
+  ctx.drawImage(base.cv, 0, HDR, w, base.h);
+  return {cv, w, h};
+}
+/* 加大原因板一覽：一次觀看所有有加大原因的鐵板排列圖，並可匯出合併 PDF / PNG（ZIP）/ 明細 Excel */
+function openReasonGallery(r, rows, titleSuffix) {
+  assignScrapNumbers(r);
+  const cts = new Map(r.cut_details.map(c => [c.idx, c]));
+  const totLoss = rows.reduce((a, x) => a + x.board - x.parts, 0);
+  const m = openModal({
+    title: `加大原因板排列圖（${rows.length} 片）${titleSuffix || ""}`, size: "xl",
+    headHTML: `<button class="btn btn-violet btn-sm" data-g="pdf">📄 匯出合併 PDF</button><button class="btn btn-slate btn-sm" data-g="png">💾 下載 PNG（ZIP）</button><button class="btn btn-green btn-sm" data-g="xlsx">📊 匯出明細 Excel</button>`,
+    bodyHTML: `<div class="tip"><b>加大原因板 ${rows.length} 片　損耗合計 ${fmtInt(totLoss)} kg</b>　｜　💡 點兩下排列圖可放大檢視</div><div class="rg-list"></div>`
+  });
+  const list = $(".rg-list", m.body);
+  const avail = Math.max(600, list.clientWidth - 40);
+  rows.forEach((x, i) => {
+    const ct = cts.get(x.idx), cap = reasonCaption(x);
+    const card = document.createElement("div");
+    card.className = "rg-card";
+    card.innerHTML = `<div class="rg-title">${esc(cap[0])}</div><div class="rg-reason">${esc(cap[1])}</div>`;
+    if (ct && ct.layout) {
+      const L = ct.layout, full = layoutSize(L, 1).w, zoom = Math.min(1, avail / full);
+      const {cv, w, h} = layoutCanvas(L, zoom, window.devicePixelRatio || 1);
+      cv.style.width = w + "px"; cv.style.height = h + "px"; cv.dataset.rg = i; cv.title = "點兩下放大檢視";
+      card.appendChild(cv);
+    }
+    list.appendChild(card);
+  });
+  list.addEventListener("dblclick", e => { const c = e.target.closest("canvas[data-rg]"); if (c) { const ct = cts.get(rows[+c.dataset.rg].idx); openLayoutViewer(ct.idx, ct.layout); } });
+  m.head.addEventListener("click", async e => {
+    const g = e.target.closest("[data-g]")?.dataset.g; if (!g) return;
+    try {
+      if (g === "xlsx") { await exportLossXlsx(r, "加大原因板", new Set(rows.map(x => x.idx)), "BH_加大原因板明細"); return; }
+      const imgs = rows.map(x => ({x, ...captionCanvas(cts.get(x.idx).layout, reasonCaption(x), 1, 2)}));
+      if (g === "png") {
+        await loadLib("jszip");
+        const zip = new JSZip();
+        for (const it of imgs) zip.file(`BH加大原因板_${safeIdx(it.x.idx)}.png`, await canvasToBlob(it.cv));
+        download(await zip.generateAsync({type: "blob"}), `BH_加大原因板排列圖_${stamp()}.zip`, "application/zip");
+        showOk("下載完成", `已打包 ${imgs.length} 張加大原因板排列圖（ZIP）。`);
+      } else {
+        await loadLib("jspdf");
+        const {jsPDF} = window.jspdf;
+        let doc = null;
+        for (const it of imgs) {
+          const orient = it.w > it.h ? "l" : "p";
+          if (!doc) doc = new jsPDF({unit: "pt", format: [it.w, it.h], orientation: orient});
+          else doc.addPage([it.w, it.h], orient);
+          // 以 JPEG 嵌入：PNG 會被 jsPDF 解壓成原始像素，片次多時字串過長而匯出失敗
+          doc.addImage(it.cv.toDataURL("image/jpeg", 0.85), "JPEG", 0, 0, it.w, it.h);
+        }
+        doc.save(`BH_加大原因板排列圖_${stamp()}.pdf`);
+        showOk("匯出完成", `已匯出 ${imgs.length} 片加大原因板排列圖（合併 PDF）。`);
+      }
+    } catch (err) { showError("匯出失敗", err.message); }
+  });
 }
 
 function openPreview(r, titleSuffix) {
@@ -1768,6 +1850,7 @@ function openPreview(r, titleSuffix) {
       cls: (x.reasons !== "—" && x.reasons !== "使用現有餘料" ? "unused" : zebra(i)) + " clickable", attrs: `data-loss="${i}"`, left: [5],
       cells: [x.idx, x.mat, x.spec, x.rows, x.need, x.reasons, fmtInt(x.board), fmtInt(x.parts), (x.util * 100).toFixed(1) + "%", fmtInt(x.board - x.parts), fmtInt(x.scrap)]}));
     return `<div class="toolbar"><span class="tip"><b>新購鋼板 ${fmtInt(tot.new_board)} kg　零件 ${fmtInt(tot.new_parts)} kg　利用率 ${util}%</b>　｜　💡 各項加總 = 板重；黃底為有加大原因的板，點兩下可查看排列圖</span><span class="grow"></span>
+      ${a.rows.some(hasEnlargeReason) ? `<button class="btn btn-sm" style="--c:#B7791F" data-a="reasonGallery">📐 加大原因板排列圖（${a.rows.filter(hasEnlargeReason).length} 片）</button>` : ""}
       <button class="btn btn-green btn-sm" data-a="lossXlsx">💾 匯出損耗分析 Excel</button></div>` +
       `<div style="flex:0 0 auto;margin-bottom:10px">${gridHTML(["項目", "重量(kg)", "佔板重", "佔損耗", "說明"], sum)}</div>` +
       gridHTML(["片次", "材質", "板規格", "排數", "需要尺寸", "加大原因", "板重(kg)", "零件(kg)", "利用率", "損耗(kg)", "餘料(kg)"], det);
@@ -1793,6 +1876,7 @@ function openPreview(r, titleSuffix) {
     if (a === "csvUnused") exportScrapsCsv(r, "unused");
     if (a === "inv") exportInventoryEvents(r);
     if (a === "lossXlsx") exportLossXlsx(r, "配料結果預覽" + (titleSuffix || ""));
+    if (a === "reasonGallery") openReasonGallery(r, lossAnalysis(r).rows.filter(hasEnlargeReason), titleSuffix);
   });
   m.body.addEventListener("dblclick", e => {
     const lr = e.target.closest("tr[data-loss]");
@@ -2067,7 +2151,8 @@ function openLayoutList(r) {
           const orient = w > h ? "l" : "p";
           if (!doc) doc = new jsPDF({unit: "pt", format: [w, h], orientation: orient});
           else doc.addPage([w, h], orient);
-          doc.addImage(cv.toDataURL("image/png"), "PNG", 0, 0, w, h);
+          // 以 JPEG 嵌入：PNG 會被 jsPDF 解壓成原始像素，片次多時字串過長而匯出失敗
+          doc.addImage(cv.toDataURL("image/jpeg", 0.85), "JPEG", 0, 0, w, h);
         }
         doc.save(`BH排列圖_${stamp()}.pdf`);
         showOk("匯出完成", `已匯出 ${sel.length} 張排列圖（合併 PDF）。\n\n每頁尺寸依排列圖實際大小自動調整。`);

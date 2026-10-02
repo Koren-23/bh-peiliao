@@ -1039,12 +1039,13 @@ LOSS_CATS = [
 ]
 
 
-def loss_analysis(r):
+def loss_analysis(r, only=None):
     """
     損耗分析：把每張板的重量拆成「零件」與各項損耗原因，各項加總 = 板重。
     新板：板面積 = 零件 + 修邊鋸縫 + 排列長短不一 + 板長補最小值 + 板寬補最小值 + 重量不足加寬 + 採購修正調整
     現有餘料板：板面積 = 零件 + 修邊鋸縫 + 排列長短不一 + 現有餘料板剩餘
-    回傳 {"rows": [...每張板], "total": {各項合計, "parts", "board", "new_board", "new_parts"}}
+    only：只分析這些片次（set）；None 為全部
+    回傳 {"rows": [...每張板], "total": {各項合計, "parts", "board", "new_board", "new_parts", "scrap"}}
     """
     p = r["params"]
     dens = p["density"]
@@ -1059,7 +1060,7 @@ def loss_analysis(r):
     rows = []
     for ct in r["cut_details"]:
         L = ct.get("layout")
-        if not L:
+        if not L or (only is not None and ct["idx"] not in only):
             continue
         t, pw, tr, kf = L["thick"], L["part_w"], L["trim"], L["kerf"]
         bw, bl = L["board_w"], L["board_l"]
@@ -1115,11 +1116,55 @@ def loss_analysis(r):
     return {"rows": rows, "total": total}
 
 
-def write_loss_xlsx(path, r, title=""):
-    """損耗分析匯出 Excel：「損耗總表」+「每片明細」"""
+def has_enlarge_reason(x):
+    """損耗分析明細列是否有加大原因（不含「使用現有餘料」）"""
+    return x["reasons"] not in ("—", "使用現有餘料")
+
+
+def layout_caption_image(layout, lines, zoom=1.0, scale_up=2):
+    """排列圖上方加標題文字（第一行為片次 / 規格，其餘為加大原因），供加大原因板匯出使用"""
+    from PIL import Image, ImageDraw
+    base = layout_to_pil_image(layout, zoom=zoom, scale_up=scale_up)
+    line_h = 26 * scale_up
+    hdr = line_h * len(lines) + 14 * scale_up
+    img = Image.new("RGB", (base.width, base.height + hdr), "white")
+    d = ImageDraw.Draw(img)
+    for i, t in enumerate(lines):
+        font = find_cjk_font((18 if i == 0 else 15) * scale_up, i == 0)
+        d.text((16 * scale_up, 8 * scale_up + i * line_h), t, font=font, fill="#1A3050" if i == 0 else "#B45309")
+    img.paste(base, (0, hdr))
+    return img
+
+
+def save_images_pdf(images, path, scale_up=2):
+    """多張 PIL 圖片合併成一份 PDF，每張一頁，頁面大小等於圖片大小（144dpi → 72pt）"""
+    import io
+    from reportlab.pdfgen import canvas as rl_canvas
+    from reportlab.lib.utils import ImageReader
+    c = rl_canvas.Canvas(path)
+    for img in images:
+        w, h = img.width / scale_up, img.height / scale_up
+        c.setPageSize((w, h))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        c.drawImage(ImageReader(buf), 0, 0, width=w, height=h)
+        c.showPage()
+    c.save()
+
+
+def reason_caption(x):
+    """加大原因板的標題文字"""
+    return [f"片次 {x['idx']}　{x['spec']}　{x['mat']}　利用率 {x['util'] * 100:.1f}%　"
+            f"損耗 {x['board'] - x['parts']:,.0f} kg　餘料 {x['scrap']:,.0f} kg",
+            "加大原因：" + x["reasons"]]
+
+
+def write_loss_xlsx(path, r, title="", only=None):
+    """損耗分析匯出 Excel：「損耗總表」+「每片明細」；only：只輸出這些片次"""
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    a = loss_analysis(r)
+    a = loss_analysis(r, only)
     tot = a["total"]
     wb = Workbook()
     thin = Side(style="thin", color="A0AEC0")
@@ -1973,6 +2018,109 @@ def layout_to_pil_image(layout, zoom=1.0, scale_up=2):
     return img
 
 
+class ReasonGalleryWindow(tk.Toplevel):
+    """加大原因板一覽：一次觀看所有有加大原因的鐵板排列圖，並可匯出合併 PDF / PNG / 明細 Excel"""
+
+    def __init__(self, parent, result, rows):
+        super().__init__(parent)
+        self.result, self.rows = result, rows
+        self.cts = {c["idx"]: c for c in result["cut_details"]}
+        assign_scrap_numbers(result)
+        self.title(f"加大原因板排列圖（{len(rows)} 片）")
+        self.geometry("1260x820")
+        self.configure(bg=CLR_BG)
+
+        bar = tk.Frame(self, bg=CLR_HEADER)
+        bar.pack(fill="x")
+        tot_loss = sum(x["board"] - x["parts"] for x in rows)
+        tk.Label(bar, text=f"加大原因板 {len(rows)} 片　損耗合計 {tot_loss:,.0f} kg",
+                 font=("Microsoft JhengHei", 12, "bold"), bg=CLR_HEADER, fg="white").pack(side="left", padx=12, pady=8)
+        for text, cmd, bg in [("📊 匯出明細 Excel", self._export_xlsx, "#4A6741"),
+                              ("💾 下載 PNG（資料夾）", self._export_png, "#5A7184"),
+                              ("📄 匯出合併 PDF", self._export_pdf, "#7B68B5")]:
+            tk.Button(bar, text=text, command=cmd, bg=bg, fg="white", relief="flat",
+                      font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=3,
+                      cursor="hand2").pack(side="right", padx=4, pady=6)
+
+        outer = tk.Frame(self, bg=CLR_BG)
+        outer.pack(fill="both", expand=True)
+        cv = tk.Canvas(outer, bg=CLR_BG, highlightthickness=0)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        cv.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(cv, bg=CLR_BG)
+        cv.create_window(0, 0, window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Enter>", lambda e: cv.bind_all("<MouseWheel>", lambda ev: cv.yview_scroll(int(-ev.delta / 120) * 3, "units")))
+        cv.bind("<Leave>", lambda e: cv.unbind_all("<MouseWheel>"))
+
+        self._photos = []
+        try:
+            from PIL import ImageTk
+        except ImportError:
+            ImageTk = None
+        MAX_W = 1180
+        for x in rows:
+            card = tk.Frame(inner, bg="white", highlightbackground="#CBD5E0", highlightthickness=1)
+            card.pack(fill="x", padx=10, pady=6)
+            cap = reason_caption(x)
+            tk.Label(card, text=cap[0], bg="white", fg="#1A3050", anchor="w",
+                     font=("Microsoft JhengHei", 11, "bold")).pack(fill="x", padx=10, pady=(6, 0))
+            tk.Label(card, text=cap[1], bg="white", fg="#B45309", anchor="w", justify="left", wraplength=MAX_W,
+                     font=("Microsoft JhengHei", 10)).pack(fill="x", padx=10)
+            ct = self.cts.get(x["idx"])
+            if ImageTk and ct and ct.get("layout"):
+                img = layout_to_pil_image(ct["layout"], zoom=1.0, scale_up=1)
+                if img.width > MAX_W:
+                    img = img.resize((MAX_W, max(1, int(img.height * MAX_W / img.width))))
+                ph = ImageTk.PhotoImage(img)
+                self._photos.append(ph)
+                lb = tk.Label(card, image=ph, bg="white", cursor="hand2")
+                lb.pack(anchor="w", padx=6, pady=6)
+                lb.bind("<Double-1>", lambda e, c=ct: LayoutWindow(self, c["idx"], c["layout"]))
+
+    def _images(self):
+        return [layout_caption_image(self.cts[x["idx"]]["layout"], reason_caption(x)) for x in self.rows]
+
+    def _export_pdf(self):
+        path = filedialog.asksaveasfilename(
+            parent=self, title="匯出加大原因板排列圖 PDF", defaultextension=".pdf",
+            initialfile=f"BH_加大原因板排列圖_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            filetypes=[("PDF 檔案", "*.pdf")])
+        if not path:
+            return
+        try:
+            save_images_pdf(self._images(), path)
+            messagebox.showinfo("匯出完成", f"已匯出 {len(self.rows)} 片加大原因板排列圖（合併 PDF）：\n{path}", parent=self)
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e), parent=self)
+
+    def _export_png(self):
+        folder = filedialog.askdirectory(parent=self, title="選擇排列圖儲存資料夾")
+        if not folder:
+            return
+        try:
+            for x, img in zip(self.rows, self._images()):
+                safe = str(x["idx"]).replace("*", "星").replace("/", "_")
+                img.save(os.path.join(folder, f"BH加大原因板_{safe}.png"), "PNG")
+            messagebox.showinfo("下載完成", f"已下載 {len(self.rows)} 張排列圖至：\n{folder}", parent=self)
+        except Exception as e:
+            messagebox.showerror("下載失敗", str(e), parent=self)
+
+    def _export_xlsx(self):
+        path = filedialog.asksaveasfilename(
+            parent=self, defaultextension=".xlsx", filetypes=[("Excel 檔案", "*.xlsx")],
+            initialfile=f"BH_加大原因板明細_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx")
+        if not path:
+            return
+        try:
+            write_loss_xlsx(path, self.result, "加大原因板", only={x["idx"] for x in self.rows})
+            messagebox.showinfo("匯出完成", f"已匯出加大原因板明細：\n{path}", parent=self)
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e), parent=self)
+
+
 class LayoutWindow(tk.Toplevel):
     """切割排列圖視窗：用 Canvas 繪製單張鋼板上每排零件的實際排列位置"""
     def __init__(self, parent, idx, layout):
@@ -2260,6 +2408,12 @@ class PreviewWindow(tk.Toplevel):
         tk.Button(bar, text="💾 匯出損耗分析 Excel", command=lambda: self._export_loss(r),
                   bg="#4A6741", fg="white", font=("Microsoft JhengHei", 9, "bold"),
                   relief="flat", padx=10, pady=3, cursor="hand2").pack(side="right")
+        reason_rows = [x for x in a["rows"] if has_enlarge_reason(x)]
+        if reason_rows:
+            tk.Button(bar, text=f"📐 加大原因板排列圖（{len(reason_rows)} 片）",
+                      command=lambda: ReasonGalleryWindow(self, r, reason_rows),
+                      bg="#B7791F", fg="white", font=("Microsoft JhengHei", 9, "bold"),
+                      relief="flat", padx=10, pady=3, cursor="hand2").pack(side="right", padx=(0, 6))
 
         # 總表
         sf = tk.Frame(frame, bg=CLR_BG)
