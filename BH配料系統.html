@@ -676,9 +676,9 @@ function planOnce(groups, P, existing_scraps, seed) {
           for (var ca = 0; ca < cols; ca++) {
             for (var cb = ca + 1; cb < cols; cb++) {
               for (var ia = 0; ia < col_parts[ca].length; ia++) {
-                var pa = col_parts[ca][ia];
                 for (var ib = 0; ib < col_parts[cb].length; ib++) {
-                  var pb = col_parts[cb][ib], k, pp;
+                  // 交換後兩排內容已改變，每次都取最新的零件（避免同一零件重複、另一零件遺失）
+                  var pa = col_parts[ca][ia], pb = col_parts[cb][ib], k, pp;
                   var nca = new_trim;
                   for (k = 0; k < col_parts[ca].length; k++) { pp = k === ia ? pb : col_parts[ca][k]; nca += (k > 0 ? new_kerf : 0) + pp.length; }
                   nca += new_trim;

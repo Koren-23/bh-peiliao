@@ -100,6 +100,32 @@ class TestConsistency(unittest.TestCase):
                         self.assertLessEqual(used + L["trim"], L["board_l"], "排超出板長")
                         self.assertEqual(bh.layout_row_left(L, rw), max(0, L["board_l"] - used - L["trim"] - L["kerf"]))
 
+    def test_every_part_placed_once(self):
+        """每個零件剛好排入一次，不重複、不遺漏（原 bug：排間互換時同一零件重複、另一零件遺失）"""
+        from collections import Counter
+        for n, c in enumerate(random_cases(40, seed=21)):
+            P = c["P"]
+            res = plan(P, c["bh"], c["scraps"], c["it"])
+            need = Counter()
+            for r in c["bh"]:
+                d = bh.decompose_bh(r, P["density"], P["new_kerf"], P["new_trim"], P["scrap_kerf"], P["scrap_trim"], [])
+                need[(d["flange"]["name"], r["length"])] += d["flange"]["total"]
+                need[(d["web"]["name"], r["length"])] += d["web"]["total"]
+            got = Counter((p["name"], p["length"]) for ct in res["cut_details"] for rw in ct["layout"]["rows"] for p in rw["parts"])
+            with self.subTest(case=n):
+                self.assertEqual(got, need)
+
+    def test_swap_does_not_duplicate_parts(self):
+        """排間互換：交換後須取最新零件（原 bug：此案例同一零件重複、另一零件遺失而計算失敗）"""
+        lens = [6900, 2500, 1600, 5900, 2100, 2200, 7100, 1500, 7600]
+        parts = [{"name": f"P{i}-F", "width": 300, "thick": 20, "length": L, "qty": 1, "total": 1,
+                  "mat": "A", "unit_wt": 1.0, "total_wt": 1.0} for i, L in enumerate(lens)]
+        _, cds, _, _ = bh._plan_once({(20, 300, "A"): parts}, 7.85, 5, 5, 5, 0, [], seed=134,
+                                     bw_min=300, bw_max=1000, bl_min=1000, bl_max=8000,
+                                     w_min=0, w_max=99999, cut_mode="multi")
+        got = sorted(p["length"] for ct in cds for rw in ct["layout"]["rows"] for p in rw["parts"])
+        self.assertEqual(got, sorted(lens))
+
     def test_unchanged_purchase_edit_equals_original(self):
         """採購修正未改尺寸時，結果與原始配料完全相同（原 bug：單段切割餘料差一個鋸縫）"""
         for n, c in enumerate(random_cases(40, seed=11)):

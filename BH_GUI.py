@@ -369,8 +369,10 @@ def _plan_once(by_group, density, new_kerf, new_trim, scrap_kerf, scrap_trim,
                     itr += 1
                     for ca in range(cols):
                         for cb in range(ca+1, cols):
-                            for ia, pa in enumerate(col_parts[ca]):
-                                for ib, pb in enumerate(col_parts[cb]):
+                            for ia in range(len(col_parts[ca])):
+                                for ib in range(len(col_parts[cb])):
+                                    # 交換後兩排內容已改變，每次都取最新的零件（避免同一零件重複、另一零件遺失）
+                                    pa, pb = col_parts[ca][ia], col_parts[cb][ib]
                                     # 試算交換 pa（在排ca第ia個）與 pb（在排cb第ib個）後的新 col_used
                                     # 重算排ca：把pa換成pb
                                     new_used_ca = new_trim
