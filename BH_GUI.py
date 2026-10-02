@@ -134,6 +134,10 @@ def run_width(run, part_w, kerf):
     return n * part_w + (n - 1) * kerf
 
 
+# 切割損耗設定預設值（與網頁版 LOSS_DEFAULTS 相同）
+LOSS_DEFAULTS = {"new_kerf": 1, "new_trim": 1, "scrap_kerf": 1, "scrap_trim": 0}
+
+
 def board_leftovers(thick, bw, bl, part_w, trim, kerf, col_used, density, src, typ, mat, new_scraps):
     """
     一張板（新板或現有餘料）的餘料：新板 / 餘料、單段 / 多段、配料計算 / 採購修正共用。
@@ -2875,14 +2879,14 @@ class BHPeilianApp(tk.Tk):
         btn(f, "🗂 排列圖PDF", self._export_layout_pdf,   "#7B68B5", "#655497")
         btn(f, "🖨 匯出 PDF",  self._export_pdf,          "#7B68B5", "#655497")
         btn(f, "💾 匯出Excel", self._export_xlsx,         "#7B68B5", "#655497")
-        btn(f, "📝 信暐訂購單", self._open_order_original, "#7B68B5", "#655497")
+        btn(f, "📝 訂購單", self._open_order_original, "#7B68B5", "#655497")
         f = cell(1, 1)
         title(f, "配料結果", ghost=True)
         head(f, "匯出")
         btn(f, "🗂 排列圖PDF", self._new_export_layout, "#96603A", "#7A4D2E")
         btn(f, "🖨 匯出PDF",   self._new_export_pdf,    "#96603A", "#7A4D2E")
         btn(f, "💾 匯出Excel", self._new_export_xlsx,   "#96603A", "#7A4D2E")
-        btn(f, "📝 信暐訂購單", self._open_order_select, "#96603A", "#7A4D2E")
+        btn(f, "📝 訂購單", self._open_order_select, "#96603A", "#7A4D2E")
 
         # 第 2 列：預覽 ／ 新預覽
         f = cell(2, 0)
@@ -3034,10 +3038,14 @@ class BHPeilianApp(tk.Tk):
 
         # 切割損耗
         sec3 = self._section(f, "切割損耗設定（mm）", 2)
-        self._lbl_entry(sec3, "新板每刀損耗：",   "new_kerf",  "1", 0)
-        self._lbl_entry(sec3, "新板頭尾損耗（每端）：", "new_trim",  "1", 1)
-        self._lbl_entry(sec3, "餘料每刀損耗：",   "scrap_kerf","1", 2)
-        self._lbl_entry(sec3, "餘料頭尾損耗（每端）：", "scrap_trim","0", 3)
+        self._lbl_entry(sec3, "新板每刀損耗：",   "new_kerf",  str(LOSS_DEFAULTS["new_kerf"]), 0)
+        self._lbl_entry(sec3, "新板頭尾損耗（每端）：", "new_trim",  str(LOSS_DEFAULTS["new_trim"]), 1)
+        self._lbl_entry(sec3, "餘料每刀損耗：",   "scrap_kerf", str(LOSS_DEFAULTS["scrap_kerf"]), 2)
+        self._lbl_entry(sec3, "餘料頭尾損耗（每端）：", "scrap_trim", str(LOSS_DEFAULTS["scrap_trim"]), 3)
+        tk.Button(sec3, text="↺ 恢復預設值", command=self._reset_loss_settings,
+                  font=("Microsoft JhengHei", 9), bg="#E2E8F0", fg="#2D3748",
+                  relief="flat", cursor="hand2", padx=10, pady=3
+                  ).grid(row=0, column=2, rowspan=4, sticky="n", padx=(16,8), pady=4)
 
         # 切割模式
         sec3b = self._section(f, "切割模式", 3)
@@ -3068,6 +3076,12 @@ class BHPeilianApp(tk.Tk):
                   font=("Microsoft JhengHei", 9), bg="#E2E8F0", fg="#2D3748",
                   relief="flat", cursor="hand2", padx=10, pady=3
                   ).grid(row=0, column=2, rowspan=5, sticky="n", padx=(16,8), pady=4)
+
+    def _reset_loss_settings(self):
+        """把「切割損耗設定」四個欄位重設回程式內建的預設值。"""
+        for k, v in LOSS_DEFAULTS.items():
+            getattr(self, f"var_{k}").set(str(v))
+        self.status_var.set("切割損耗設定已恢復預設值。")
 
     def _reset_purchase_limits(self):
         """把「採購限制」六個欄位重設回程式內建的預設值，並提示使用者已重設成功。"""
@@ -5086,7 +5100,7 @@ class OrderSelectWindow(tk.Toplevel):
                   command=self._preview,
                   bg="#4A6C7A", fg="white", font=("Microsoft JhengHei", 10, "bold"),
                   relief="flat", padx=14, pady=6, cursor="hand2").pack(side="left", padx=(8,0))
-        tk.Button(btn_bar, text="📥 信暐訂購單 Excel",
+        tk.Button(btn_bar, text="📥 訂購單 Excel",
                   command=self._export,
                   bg="#4A6741", fg="white", font=("Microsoft JhengHei", 10, "bold"),
                   relief="flat", padx=14, pady=6, cursor="hand2").pack(side="right")

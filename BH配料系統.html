@@ -230,7 +230,7 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
             <label class="lbl" for="p_mat">材質：</label>
             <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><select id="p_mat"></select><span class="density" id="densityLbl"></span></div>
           </div></div>
-          <div class="sec"><h2>切割損耗設定（mm）</h2><div class="body">
+          <div class="sec"><h2>切割損耗設定（mm）<button class="btn btn-ghost btn-sm" data-act="resetLoss">↺ 恢復預設值</button></h2><div class="body">
             <label class="lbl" for="p_new_kerf">新板每刀損耗：</label><input id="p_new_kerf" data-p="new_kerf" data-int value="1" inputmode="numeric">
             <label class="lbl" for="p_new_trim">新板頭尾損耗（每端）：</label><input id="p_new_trim" data-p="new_trim" data-int value="1" inputmode="numeric">
             <label class="lbl" for="p_scrap_kerf">餘料每刀損耗：</label><input id="p_scrap_kerf" data-p="scrap_kerf" data-int value="1" inputmode="numeric">
@@ -307,7 +307,7 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
       <button class="btn sb-exp" data-act="exportLayoutPdf">🗂 排列圖PDF</button>
       <button class="btn sb-exp" data-act="exportPdf">🖨 匯出 PDF</button>
       <button class="btn sb-exp" data-act="exportXlsx">💾 匯出Excel</button>
-      <button class="btn sb-exp" data-act="orderOrig">📝 信暐訂購單</button>
+      <button class="btn sb-exp" data-act="orderOrig">📝 訂購單</button>
     </div>
     <div class="cell b row">
       <div class="side-title ghost" aria-hidden="true">配料結果</div>
@@ -315,7 +315,7 @@ pre.diag{background:#fff;border:1px solid var(--line);border-radius:8px;padding:
       <button class="btn sb-exp2" data-act="newExportLayout">🗂 排列圖PDF</button>
       <button class="btn sb-exp2" data-act="newExportPdf">🖨 匯出PDF</button>
       <button class="btn sb-exp2" data-act="newExportXlsx">💾 匯出Excel</button>
-      <button class="btn sb-exp2" data-act="orderNew">📝 信暐訂購單</button>
+      <button class="btn sb-exp2" data-act="orderNew">📝 訂購單</button>
     </div>
     <!-- 第 3 列：預覽 ／ 新預覽 -->
     <div class="cell a row">
@@ -1021,6 +1021,12 @@ function initParams() {
 function updateDensity() { $("#densityLbl").textContent = `比重：${DENSITY[$("#p_mat").value]}`; }
 function validateParamField(inp) {
   if (inp.hasAttribute("data-int")) inp.classList.toggle("bad", !/^\s*[+-]?\d+\s*$/.test(inp.value));
+}
+/* 切割損耗設定預設值（與桌面版 LOSS_DEFAULTS 相同） */
+const LOSS_DEFAULTS = {new_kerf: 1, new_trim: 1, scrap_kerf: 1, scrap_trim: 0};
+function resetLoss(silent) {
+  Object.entries(LOSS_DEFAULTS).forEach(([k, v]) => { const el = $(`#p_${k}`); el.value = String(v); validateParamField(el); });
+  if (!silent) { setStatus("切割損耗設定已恢復預設值。"); markDirty(); }
 }
 function resetLimits(silent) {
   const d = {bw_min: BW_MIN, bw_max: BW_MAX, bl_min: BL_MIN, bl_max: BL_MAX, w_min: W_MIN, w_max: W_MAX};
@@ -2694,7 +2700,7 @@ function openOrderSelect(r) {
         <label class="lbl" for="od_date">訂購日期：</label><input id="od_date" value="${today()}"></div></div>
       <div class="toolbar"><button class="btn btn-slate btn-sm" data-a="all">全選</button><button class="btn btn-gray btn-sm" data-a="none">全不選</button><span class="grow"></span><span class="count" id="odCount"></span></div>
       <div class="od-host" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>`,
-    footHTML: `<button class="btn btn-gray" data-a="cancel">❌ 取消</button><button class="btn btn-slate" data-a="preview">👁 預覽訂購單</button><span class="grow"></span><button class="btn btn-green" data-a="export">📥 信暐訂購單 Excel</button>`
+    footHTML: `<button class="btn btn-gray" data-a="cancel">❌ 取消</button><button class="btn btn-slate" data-a="preview">👁 預覽訂購單</button><span class="grow"></span><button class="btn btn-green" data-a="export">📥 訂購單 Excel</button>`
   });
   if (window.matchMedia("(max-width:700px)").matches) $(".body", m.body).style.gridTemplateColumns = "auto 1fr";
   const host = $(".od-host", m.body);
@@ -2746,6 +2752,7 @@ const ACTIONS = {
   save: () => saveSession(false),
   saveAs: () => saveSession(true),
   resetLimits: () => resetLimits(false),
+  resetLoss: () => resetLoss(false),
   bhAdd, scAdd,
   bhDel: () => delSelected("bh", renderBh),
   scDel: () => delSelected("sc", renderSc),
