@@ -1052,7 +1052,10 @@ def loss_analysis(r):
     bl_min, bl_max = p.get("bl_min", BL_MIN), p.get("bl_max", BL_MAX)
     w_min, w_max = p.get("w_min", W_MIN), p.get("w_max", W_MAX)
     keys = [k for k, _, _ in LOSS_CATS]
-    total = dict.fromkeys(keys + ["parts", "board", "new_board", "new_parts"], 0.0)
+    total = dict.fromkeys(keys + ["parts", "board", "new_board", "new_parts", "scrap"], 0.0)
+    scrap_of = {}   # 片次 → 餘料重量（與「餘料清單」相同）
+    for s_ in r.get("new_scraps", []):
+        scrap_of[s_["src"]] = scrap_of.get(s_["src"], 0) + s_["wt"]
     rows = []
     for ct in r["cut_details"]:
         L = ct.get("layout")
@@ -1104,9 +1107,11 @@ def loss_analysis(r):
             total[k] += loss[k]
         total["parts"] += parts
         total["board"] += board
+        scrap = scrap_of.get(ct["idx"], 0)
+        total["scrap"] += scrap
         rows.append({"idx": ct["idx"], "mat": ct.get("mat", ""), "spec": ct["board_spec"], "type": ct.get("type", ""),
                      "rows": n, "need": f"{need_w:,}×{need_l:,}", "reasons": "；".join(reasons) or "—",
-                     "board": board, "parts": parts, "loss": loss, "util": parts / board if board else 0})
+                     "board": board, "parts": parts, "loss": loss, "scrap": scrap, "util": parts / board if board else 0})
     return {"rows": rows, "total": total}
 
 
@@ -1151,16 +1156,20 @@ def write_loss_xlsx(path, r, title=""):
         if abs(tot[k]) >= 0.5 or k in ("trim", "arrange"):
             data.append([name, tot[k], ratio(tot[k]), lratio(tot[k]), desc])
     data.append(["損耗合計", loss_all, ratio(loss_all), 1.0, ""])
+    data.append(["　其中：餘料（可再利用）", tot["scrap"], ratio(tot["scrap"]), lratio(tot["scrap"]), "與「餘料清單」合計重量相同，可直接比對"])
+    data.append(["　其中：無法再利用", loss_all - tot["scrap"], ratio(loss_all - tot["scrap"]), lratio(loss_all - tot["scrap"]),
+                 "修邊、鋸縫、餘料切下時的鋸縫等"])
     data.append(["合計（板重）", tot["board"], 1.0, "", ""])
     table(ws, 4, ["項目", "重量(kg)", "佔板重", "佔損耗", "說明"], data, [22, 14, 10, 10, 70], (3, 4))
     ws.cell(len(data) + 6, 1, f"新購鋼板 {tot['new_board']:,.0f} kg，零件 {tot['new_parts']:,.0f} kg，"
                               f"利用率 {tot['new_parts'] / tot['new_board'] * 100 if tot['new_board'] else 0:.1f}%")
 
     ws2 = wb.create_sheet("每片明細")
-    head = ["片次", "材質", "板規格", "排數", "需要尺寸(寬×長)", "加大原因", "板重(kg)", "零件(kg)", "利用率"] +            [name + "(kg)" for _, name, _ in LOSS_CATS]
-    data = [[x["idx"], x["mat"], x["spec"], x["rows"], x["need"], x["reasons"], x["board"], x["parts"], x["util"]] +
-            [x["loss"][k] for k, _, _ in LOSS_CATS] for x in a["rows"]]
-    table(ws2, 1, head, data, [8, 10, 22, 6, 16, 48, 11, 11, 8] + [12] * len(LOSS_CATS), (9,))
+    head = (["片次", "材質", "板規格", "排數", "需要尺寸(寬×長)", "加大原因", "板重(kg)", "零件(kg)", "利用率",
+             "損耗(kg)", "餘料(kg)"] + [name + "(kg)" for _, name, _ in LOSS_CATS])
+    data = [[x["idx"], x["mat"], x["spec"], x["rows"], x["need"], x["reasons"], x["board"], x["parts"], x["util"],
+             x["board"] - x["parts"], x["scrap"]] + [x["loss"][k] for k, _, _ in LOSS_CATS] for x in a["rows"]]
+    table(ws2, 1, head, data, [8, 10, 22, 6, 16, 48, 11, 11, 8, 11, 11] + [12] * len(LOSS_CATS), (9,))
     ws2.freeze_panes = "B2"
     wb.save(path)
 
@@ -2256,7 +2265,7 @@ class PreviewWindow(tk.Toplevel):
         sf = tk.Frame(frame, bg=CLR_BG)
         sf.pack(fill="x", padx=4, pady=4)
         scols = ("項目", "重量(kg)", "佔板重", "佔損耗", "說明")
-        st = ttk.Treeview(sf, columns=scols, show="headings", height=len(LOSS_CATS) + 3)
+        st = ttk.Treeview(sf, columns=scols, show="headings", height=len(LOSS_CATS) + 5)
         for col, w in zip(scols, [150, 110, 70, 70, 520]):
             st.heading(col, text=col)
             st.column(col, width=w, anchor="w" if col == "說明" else "center")
@@ -2269,12 +2278,17 @@ class PreviewWindow(tk.Toplevel):
             if abs(tot[k]) >= 0.5 or k in ("trim", "arrange"):
                 st.insert("", "end", values=(name, f"{tot[k]:,.0f}", pct(tot[k]), lpct(tot[k]), desc))
         st.insert("", "end", values=("損耗合計", f"{loss_all:,.0f}", pct(loss_all), "100%", ""), tags=("comp",))
+        st.tag_configure("scrap", background="#E8F5E9")
+        st.insert("", "end", values=("　其中：餘料（可再利用）", f"{tot['scrap']:,.0f}", pct(tot["scrap"]), lpct(tot["scrap"]),
+                                     "與「餘料清單」合計重量相同，可直接比對"), tags=("scrap",))
+        st.insert("", "end", values=("　其中：無法再利用", f"{loss_all - tot['scrap']:,.0f}", pct(loss_all - tot["scrap"]),
+                                     lpct(loss_all - tot["scrap"]), "修邊、鋸縫、餘料切下時的鋸縫等"))
         st.insert("", "end", values=("合計（板重）", f"{tot['board']:,.0f}", "100%", "", ""), tags=("comp",))
         st.pack(fill="x")
 
         # 每片明細
-        cols = ("片次", "材質", "板規格", "排數", "需要尺寸", "加大原因", "板重(kg)", "零件(kg)", "利用率", "損耗(kg)")
-        tree = self._make_tree(frame, cols, [60, 70, 170, 45, 110, 380, 80, 80, 60, 80])
+        cols = ("片次", "材質", "板規格", "排數", "需要尺寸", "加大原因", "板重(kg)", "零件(kg)", "利用率", "損耗(kg)", "餘料(kg)")
+        tree = self._make_tree(frame, cols, [60, 70, 170, 45, 110, 360, 80, 80, 60, 75, 75])
         tree.column("加大原因", anchor="w")
         tree.tag_configure("pad", background="#FFF3CD")
         self._loss_layouts = {}
@@ -2283,7 +2297,7 @@ class PreviewWindow(tk.Toplevel):
             tag = "pad" if x["reasons"] not in ("—", "使用現有餘料") else ("odd" if i % 2 == 0 else "even")
             iid = tree.insert("", "end", values=(x["idx"], x["mat"], x["spec"], x["rows"], x["need"], x["reasons"],
                                                  f"{x['board']:,.0f}", f"{x['parts']:,.0f}", f"{x['util'] * 100:.1f}%",
-                                                 f"{lost:,.0f}"), tags=(tag,))
+                                                 f"{lost:,.0f}", f"{x['scrap']:,.0f}"), tags=(tag,))
             ct = next((c for c in r["cut_details"] if c["idx"] == x["idx"]), None)
             if ct and ct.get("layout"):
                 self._loss_layouts[iid] = (ct["idx"], ct["layout"])
