@@ -100,6 +100,20 @@ class TestConsistency(unittest.TestCase):
                         self.assertLessEqual(used + L["trim"], L["board_l"], "排超出板長")
                         self.assertEqual(bh.layout_row_left(L, rw), max(0, L["board_l"] - used - L["trim"] - L["kerf"]))
 
+    def test_loss_analysis_sums_to_board(self):
+        """損耗分析：零件 + 各項損耗 = 板重（含採購修正、現有餘料）"""
+        for n, c in enumerate(random_cases(30, seed=31)):
+            res = plan(c["P"], c["bh"], c["scraps"], c["it"])
+            rows = pe_rows(res)
+            if rows:
+                rows[0]["length"] += 300
+            for rr in (res, pe(res, rows)._make_modified_result()):
+                a = bh.loss_analysis(rr)
+                with self.subTest(case=n):
+                    for x in a["rows"]:
+                        self.assertAlmostEqual(x["parts"] + sum(x["loss"].values()), x["board"], places=6)
+                        self.assertGreaterEqual(min(v for k, v in x["loss"].items() if k != "edit"), -1e-6)
+
     def test_every_part_placed_once(self):
         """每個零件剛好排入一次，不重複、不遺漏（原 bug：排間互換時同一零件重複、另一零件遺失）"""
         from collections import Counter
@@ -310,7 +324,12 @@ class TestWebDesktopParity(unittest.TestCase):
             dump = lambda r: {"board": [x["board_spec"] for x in r["cut_details"]], "left": [x["leftover"] for x in r["cut_details"]],
                               "type": [x["type"] for x in r["cut_details"]], "scraps": [s["spec"] for s in r["new_scraps"]],
                               "buy": [p["spec"] for p in r["purchase_list"]]}
+            def loss_dump(rr):
+                a = bh.loss_analysis(rr)
+                return {"total": {k: round(v * 10) / 10 for k, v in a["total"].items()},
+                        "reasons": [x["reasons"] for x in a["rows"]]}
             py_out.append({"orig": dump(res), "mod": dump(mod), "check": [list(w._check_size(r)) for r in rows],
+                           "loss": [loss_dump(res), loss_dump(mod)],
                            "rows": [[r["orig_spec"], r["mat"], r["width"], r["length"], r["qty"], r["cts"]] for r in rows]})
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf8") as f:
             json.dump(cases, f, ensure_ascii=False)
@@ -329,6 +348,8 @@ class TestWebDesktopParity(unittest.TestCase):
                 self.assertEqual(js["check"], py["check"])
             with self.subTest(case=n, part="rows"):
                 self.assertEqual(js["rows"], py["rows"])
+            with self.subTest(case=n, part="loss"):
+                self.assertEqual(js["loss"], py["loss"])
 
 
 if __name__ == "__main__":

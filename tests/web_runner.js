@@ -21,8 +21,13 @@ const ui = [
   "const peSpec = row => `PL${row.thick}×${row.width}×${row.length}`;",
   line("const peBoardKey"), line("const peRowKey"), line("const ctBoardKey"), grab("const peRowCts") + ";",
   grab("function checkSize"), grab("function makeModifiedResult"),
+  "const LOSS_CATS = " + html.slice(html.indexOf("const LOSS_CATS = [") + "const LOSS_CATS = ".length, html.indexOf("];", html.indexOf("const LOSS_CATS = [")) + 1) + ";",
+  grab("function lossAnalysis"),
 ].join("\n");
-const T = (0, eval)(core + "\n" + ui + "\n({planPurchase, decomposeBH, buildPeRows, peSplitRow, makeModifiedResult, checkSize});");
+const T = (0, eval)(core + "\n" + ui + "\n({planPurchase, decomposeBH, buildPeRows, peSplitRow, makeModifiedResult, checkSize, lossAnalysis});");
+const lossDump = r => { const a = T.lossAnalysis(r); return {
+  total: Object.fromEntries(Object.entries(a.total).map(([k, v]) => [k, Math.round(v * 10) / 10])),
+  reasons: a.rows.map(x => x.reasons)}; };
 
 const dump = r => ({
   board: r.cut_details.map(c => c.board_spec), left: r.cut_details.map(c => c.leftover),
@@ -44,6 +49,7 @@ const out = cases.map(c => {
   });
   const mod = T.makeModifiedResult(res, rows);
   return {orig: dump(res), mod: dump(mod), check: rows.map(row => T.checkSize(res, row)),
+          loss: [lossDump(res), lossDump(mod)],
           rows: rows.map(row => [row.orig_spec, row.mat, row.width, row.length, row.qty, row.cts])};
 });
 process.stdout.write(JSON.stringify(out));

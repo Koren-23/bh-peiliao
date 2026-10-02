@@ -1580,6 +1580,103 @@ function gridHTML(cols, rows) {
       `<td class="${(r.left || []).includes(i) ? "l" : ""}">${v && v.html !== undefined ? v.html : esc(v)}</td>`).join("")}</tr>`).join("")
   }</tbody></table></div>`;
 }
+/* ═════════════════════════════════════════════════════════════════
+   損耗分析（對應 loss_analysis / write_loss_xlsx）
+   每張板的重量拆成「零件」與各項損耗原因，各項加總 = 板重
+   ═════════════════════════════════════════════════════════════════ */
+const LOSS_CATS = [
+  ["trim",    "修邊 / 鋸縫",     "板材四周修邊與切割鋸縫的損耗"],
+  ["arrange", "排列長短不一",    "同一張板各排長度不同，較短的排尾端剩料（板長由最長的排決定）"],
+  ["pad_l",   "板長補到最小值",  "零件需要的板長不足採購最小板長，板子加長"],
+  ["pad_w",   "板寬補到最小值",  "零件需要的板寬不足採購最小板寬，板子加寬"],
+  ["wmin",    "重量不足加寬",    "板重低於採購最低重量，板子加寬（片次標記 *）"],
+  ["edit",    "採購修正調整",    "採購修正手動改變板寬 / 板長造成的增減"],
+  ["stock",   "現有餘料板剩餘",  "使用現有餘料時，餘料板未用到的部分"],
+];
+function lossAnalysis(r) {
+  const p = r.params, dens = p.density, lim = (k, d) => (typeof p[k] === "number" ? p[k] : d);
+  const bw_min = lim("bw_min", BW_MIN), bw_max = lim("bw_max", BW_MAX), bl_min = lim("bl_min", BL_MIN), bl_max = lim("bl_max", BL_MAX);
+  const w_min = lim("w_min", W_MIN), w_max = lim("w_max", W_MAX);
+  const keys = LOSS_CATS.map(c => c[0]), total = {parts: 0, board: 0, new_board: 0, new_parts: 0};
+  keys.forEach(k => { total[k] = 0; });
+  const rows = [], n0 = v => v.toLocaleString("en-US");
+  r.cut_details.forEach(ct => {
+    const L = ct.layout; if (!L) return;
+    const t = L.thick, pw = L.part_w, tr = L.trim, kf = L.kerf, bw = L.board_w, bl = L.board_l, n = L.rows.length;
+    const used = L.rows.map(rw => layoutRowUsed(L, rw));
+    const need_w = n * pw + (n - 1) * kf + tr * 2, need_l = Math.max(...used) + tr;
+    const kg = (w, l) => calcWeight(w, t, l, dens);
+    let plen = 0; L.rows.forEach(rw => rw.parts.forEach(x => { plen += x.length; }));
+    const parts = kg(pw, plen), board = kg(bw, bl), loss = {}, reasons = [];
+    keys.forEach(k => { loss[k] = 0; });
+    loss.arrange = kg(pw, used.reduce((a, u) => a + (need_l - tr - u), 0));
+    loss.trim = kg(need_w, need_l) - parts - loss.arrange;
+    if (ct.is_scrap) {
+      loss.stock = board - kg(need_w, need_l);
+      reasons.push("使用現有餘料");
+    } else {
+      const w1 = Math.min(Math.max(need_w, bw_min), bw_max), l_std = Math.min(Math.max(need_l, bl_min), bl_max);
+      let w_std = w1;
+      if (kg(w1, l_std) < w_min) {
+        const need_ww = w_min / (t / 1000 * l_std / 1000 * dens * 1000);
+        w_std = Math.min(Math.trunc(Math.ceil(need_ww * 1000 / 10) * 10), bw_max);
+      }
+      loss.pad_w = kg(w1 - need_w, bl);
+      loss.wmin = kg(w_std - w1, bl);
+      loss.pad_l = kg(need_w, l_std - need_l);
+      loss.edit = board - kg(need_w, need_l) - loss.pad_w - loss.wmin - loss.pad_l;
+      if (l_std > need_l) reasons.push(`長度不足：需 ${n0(need_l)} → 補到最小板長 ${n0(l_std)}`);
+      if (w1 > need_w) reasons.push(`板寬不足：需 ${n0(need_w)} → 補到最小板寬 ${n0(w1)}`);
+      if (w_std > w1) reasons.push(`重量不足：${n0(pyRound(kg(w1, l_std), 0))} kg < 最低 ${n0(w_min)} kg → 加寬至 ${n0(w_std)}`);
+      if (kg(w_std, l_std) > w_max) reasons.push(`超過最高重量 ${n0(w_max)} kg`);
+      if (bw !== w_std || bl !== l_std) reasons.push(`採購修正：${n0(w_std)}×${n0(l_std)} → ${n0(bw)}×${n0(bl)}`);
+      total.new_board += board; total.new_parts += parts;
+    }
+    keys.forEach(k => { total[k] += loss[k]; });
+    total.parts += parts; total.board += board;
+    rows.push({idx: ct.idx, mat: ct.mat || "", spec: ct.board_spec, type: ct.type || "", rows: n,
+               need: `${n0(need_w)}×${n0(need_l)}`, reasons: reasons.join("；") || "—",
+               board, parts, loss, util: board ? parts / board : 0});
+  });
+  return {rows, total};
+}
+async function exportLossXlsx(r, title) {
+  await loadLib("exceljs");
+  const a = lossAnalysis(r), tot = a.total, p = r.params, wb = new ExcelJS.Workbook();
+  const thin = {style: "thin", color: {argb: "FFA0AEC0"}}, bd = {left: thin, right: thin, top: thin, bottom: thin};
+  const table = (ws, start, head, data, widths, pctCols) => {   // pctCols：百分比欄（1 起算）
+    head.forEach((h, c) => {
+      const x = ws.getCell(start, c + 1); x.value = h; x.border = bd;
+      x.font = {bold: true, color: {argb: "FFFFFFFF"}}; x.fill = {type: "pattern", pattern: "solid", fgColor: {argb: "FF1A3050"}};
+      x.alignment = {horizontal: "center", vertical: "middle", wrapText: true};
+    });
+    data.forEach((row, i) => row.forEach((v, c) => {
+      const x = ws.getCell(start + 1 + i, c + 1); if (v !== "") x.value = v; x.border = bd;
+      x.alignment = {vertical: "middle", wrapText: typeof v === "string" && v.length > 20};
+      if (typeof v === "number") x.numFmt = pctCols.includes(c + 1) ? "0.0%" : "#,##0";
+    }));
+    widths.forEach((w, c) => { ws.getColumn(c + 1).width = w; });
+  };
+  const ws = wb.addWorksheet("損耗總表");
+  ws.getCell("A1").value = `損耗分析${title ? "　" + title : ""}`; ws.getCell("A1").font = {bold: true, size: 14};
+  ws.getCell("A2").value = `案號 ${p.proj_no || ""}　案名 ${p.proj_name || ""}　採購限制：板寬 ${fmtInt(p.bw_min ?? BW_MIN)}~${fmtInt(p.bw_max ?? BW_MAX)}、板長 ${fmtInt(p.bl_min ?? BL_MIN)}~${fmtInt(p.bl_max ?? BL_MAX)}、板重 ${fmtInt(p.w_min ?? W_MIN)}~${fmtInt(p.w_max ?? W_MAX)} kg`;
+  const lossAll = tot.board - tot.parts, ratio = v => tot.board ? v / tot.board : 0, lratio = v => lossAll ? v / lossAll : 0;
+  const data = [["零件（有效使用）", tot.parts, ratio(tot.parts), "", "裁切成 BH 翼板 / 腹板的重量"]];
+  LOSS_CATS.forEach(([k, name, desc]) => { if (Math.abs(tot[k]) >= 0.5 || k === "trim" || k === "arrange") data.push([name, tot[k], ratio(tot[k]), lratio(tot[k]), desc]); });
+  data.push(["損耗合計", lossAll, ratio(lossAll), 1, ""]);
+  data.push(["合計（板重）", tot.board, 1, "", ""]);
+  table(ws, 4, ["項目", "重量(kg)", "佔板重", "佔損耗", "說明"], data, [22, 14, 10, 10, 70], [3, 4]);
+  ws.getCell(data.length + 6, 1).value = `新購鋼板 ${fmtInt(tot.new_board)} kg，零件 ${fmtInt(tot.new_parts)} kg，利用率 ${(tot.new_board ? tot.new_parts / tot.new_board * 100 : 0).toFixed(1)}%`;
+  const ws2 = wb.addWorksheet("每片明細");
+  table(ws2, 1, ["片次", "材質", "板規格", "排數", "需要尺寸(寬×長)", "加大原因", "板重(kg)", "零件(kg)", "利用率", ...LOSS_CATS.map(c => c[1] + "(kg)")],
+        a.rows.map(x => [x.idx, x.mat, x.spec, x.rows, x.need, x.reasons, x.board, x.parts, x.util, ...LOSS_CATS.map(c => x.loss[c[0]])]),
+        [8, 10, 22, 6, 16, 48, 11, 11, 8, ...LOSS_CATS.map(() => 12)], [9]);
+  ws2.views = [{state: "frozen", xSplit: 1, ySplit: 1}];
+  const buf = await wb.xlsx.writeBuffer();
+  download(new Blob([buf], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), `BH_損耗分析_${stamp()}.xlsx`);
+  showOk("匯出完成", "已匯出損耗分析（損耗總表 + 每片明細）。");
+}
+
 function openPreview(r, titleSuffix) {
   assignScrapNumbers(r);   // 統一賦予餘NO，排列圖需要讀取
   const zebra = i => i % 2 === 0 ? "odd" : "even";
@@ -1643,6 +1740,25 @@ function openPreview(r, titleSuffix) {
       gridHTML(["餘NO", "來源", "板別", "餘料規格(mm)", "材質", "重量(kg)", "狀態"], rows);
   };
 
+  tabs["損耗分析"] = () => {
+    const a = lossAnalysis(r), tot = a.total, pct = v => tot.board ? (v / tot.board * 100).toFixed(2) + "%" : "";
+    const lossAll = tot.board - tot.parts, lpct = v => lossAll ? (v / lossAll * 100).toFixed(1) + "%" : "";
+    const util = tot.new_board ? (tot.new_parts / tot.new_board * 100).toFixed(1) : "0.0";
+    const sum = [{cls: "odd", cells: ["零件（有效使用）", fmtInt(tot.parts), pct(tot.parts), "", "裁切成 BH 翼板 / 腹板的重量"], left: [4]}];
+    LOSS_CATS.forEach(([k, name, desc], i) => {
+      if (Math.abs(tot[k]) >= 0.5 || k === "trim" || k === "arrange") sum.push({cls: zebra(sum.length), cells: [name, fmtInt(tot[k]), pct(tot[k]), lpct(tot[k]), desc], left: [4]});
+    });
+    sum.push({cls: "tot", cells: ["損耗合計", fmtInt(lossAll), pct(lossAll), "100%", ""]});
+    sum.push({cls: "tot", cells: ["合計（板重）", fmtInt(tot.board), "100%", "", ""]});
+    const det = a.rows.map((x, i) => ({
+      cls: (x.reasons !== "—" && x.reasons !== "使用現有餘料" ? "unused" : zebra(i)) + " clickable", attrs: `data-loss="${i}"`, left: [5],
+      cells: [x.idx, x.mat, x.spec, x.rows, x.need, x.reasons, fmtInt(x.board), fmtInt(x.parts), (x.util * 100).toFixed(1) + "%", fmtInt(x.board - x.parts)]}));
+    return `<div class="toolbar"><span class="tip"><b>新購鋼板 ${fmtInt(tot.new_board)} kg　零件 ${fmtInt(tot.new_parts)} kg　利用率 ${util}%</b>　｜　💡 各項加總 = 板重；黃底為有加大原因的板，點兩下可查看排列圖</span><span class="grow"></span>
+      <button class="btn btn-green btn-sm" data-a="lossXlsx">💾 匯出損耗分析 Excel</button></div>` +
+      `<div style="flex:0 0 auto;margin-bottom:10px">${gridHTML(["項目", "重量(kg)", "佔板重", "佔損耗", "說明"], sum)}</div>` +
+      gridHTML(["片次", "材質", "板規格", "排數", "需要尺寸", "加大原因", "板重(kg)", "零件(kg)", "利用率", "損耗(kg)"], det);
+  };
+
   const names = Object.keys(tabs);
   const m = openModal({
     title: "配料結果預覽" + (titleSuffix || ""), size: "xl",
@@ -1662,8 +1778,11 @@ function openPreview(r, titleSuffix) {
     if (a === "csvNew") exportScrapsCsv(r, "new");
     if (a === "csvUnused") exportScrapsCsv(r, "unused");
     if (a === "inv") exportInventoryEvents(r);
+    if (a === "lossXlsx") exportLossXlsx(r, "配料結果預覽" + (titleSuffix || ""));
   });
   m.body.addEventListener("dblclick", e => {
+    const lr = e.target.closest("tr[data-loss]");
+    if (lr) { const x = lossAnalysis(r).rows[+lr.dataset.loss], ct = r.cut_details.find(c => c.idx === x.idx); if (ct && ct.layout) openLayoutViewer(ct.idx, ct.layout); return; }
     const tr = e.target.closest("tr[data-ct]"); if (!tr) return;
     const ct = r.cut_details[+tr.dataset.ct];
     if (ct.layout) openLayoutViewer(ct.idx, ct.layout);

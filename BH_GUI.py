@@ -1024,6 +1024,143 @@ def leftover_specs(left):
     return [p.split("（")[0].strip() for p in left.split("　") if p.split("（")[0].strip()]
 
 
+LOSS_CATS = [
+    ("trim",    "修邊 / 鋸縫",       "板材四周修邊與切割鋸縫的損耗"),
+    ("arrange", "排列長短不一",      "同一張板各排長度不同，較短的排尾端剩料（板長由最長的排決定）"),
+    ("pad_l",   "板長補到最小值",    "零件需要的板長不足採購最小板長，板子加長"),
+    ("pad_w",   "板寬補到最小值",    "零件需要的板寬不足採購最小板寬，板子加寬"),
+    ("wmin",    "重量不足加寬",      "板重低於採購最低重量，板子加寬（片次標記 *）"),
+    ("edit",    "採購修正調整",      "採購修正手動改變板寬 / 板長造成的增減"),
+    ("stock",   "現有餘料板剩餘",    "使用現有餘料時，餘料板未用到的部分"),
+]
+
+
+def loss_analysis(r):
+    """
+    損耗分析：把每張板的重量拆成「零件」與各項損耗原因，各項加總 = 板重。
+    新板：板面積 = 零件 + 修邊鋸縫 + 排列長短不一 + 板長補最小值 + 板寬補最小值 + 重量不足加寬 + 採購修正調整
+    現有餘料板：板面積 = 零件 + 修邊鋸縫 + 排列長短不一 + 現有餘料板剩餘
+    回傳 {"rows": [...每張板], "total": {各項合計, "parts", "board", "new_board", "new_parts"}}
+    """
+    p = r["params"]
+    dens = p["density"]
+    bw_min, bw_max = p.get("bw_min", BW_MIN), p.get("bw_max", BW_MAX)
+    bl_min, bl_max = p.get("bl_min", BL_MIN), p.get("bl_max", BL_MAX)
+    w_min, w_max = p.get("w_min", W_MIN), p.get("w_max", W_MAX)
+    keys = [k for k, _, _ in LOSS_CATS]
+    total = dict.fromkeys(keys + ["parts", "board", "new_board", "new_parts"], 0.0)
+    rows = []
+    for ct in r["cut_details"]:
+        L = ct.get("layout")
+        if not L:
+            continue
+        t, pw, tr, kf = L["thick"], L["part_w"], L["trim"], L["kerf"]
+        bw, bl = L["board_w"], L["board_l"]
+        n = len(L["rows"])
+        used = [layout_row_used(L, rw) for rw in L["rows"]]
+        need_w = n * pw + (n - 1) * kf + tr * 2
+        need_l = max(used) + tr
+
+        def kg(w, l):
+            return calc_weight(w, t, l, dens)
+
+        parts = kg(pw, sum(x["length"] for rw in L["rows"] for x in rw["parts"]))
+        board = kg(bw, bl)
+        loss = dict.fromkeys(keys, 0.0)
+        loss["arrange"] = kg(pw, sum(need_l - tr - u for u in used))
+        loss["trim"] = kg(need_w, need_l) - parts - loss["arrange"]
+        reasons = []
+        if ct.get("is_scrap"):
+            loss["stock"] = board - kg(need_w, need_l)
+            reasons.append("使用現有餘料")
+        else:
+            w1 = min(max(need_w, bw_min), bw_max)
+            l_std = min(max(need_l, bl_min), bl_max)
+            w_std = w1
+            if kg(w1, l_std) < w_min:
+                need_ww = w_min / (t / 1000 * l_std / 1000 * dens * 1000)
+                w_std = min(int(math.ceil(need_ww * 1000 / 10) * 10), bw_max)
+            loss["pad_w"] = kg(w1 - need_w, bl)
+            loss["wmin"] = kg(w_std - w1, bl)
+            loss["pad_l"] = kg(need_w, l_std - need_l)
+            loss["edit"] = board - kg(need_w, need_l) - loss["pad_w"] - loss["wmin"] - loss["pad_l"]
+            if l_std > need_l:
+                reasons.append(f"長度不足：需 {need_l:,} → 補到最小板長 {l_std:,}")
+            if w1 > need_w:
+                reasons.append(f"板寬不足：需 {need_w:,} → 補到最小板寬 {w1:,}")
+            if w_std > w1:
+                reasons.append(f"重量不足：{round(kg(w1, l_std)):,} kg < 最低 {w_min:,} kg → 加寬至 {w_std:,}")
+            if kg(w_std, l_std) > w_max:
+                reasons.append(f"超過最高重量 {w_max:,} kg")
+            if (bw, bl) != (w_std, l_std):
+                reasons.append(f"採購修正：{w_std:,}×{l_std:,} → {bw:,}×{bl:,}")
+            total["new_board"] += board
+            total["new_parts"] += parts
+        for k in keys:
+            total[k] += loss[k]
+        total["parts"] += parts
+        total["board"] += board
+        rows.append({"idx": ct["idx"], "mat": ct.get("mat", ""), "spec": ct["board_spec"], "type": ct.get("type", ""),
+                     "rows": n, "need": f"{need_w:,}×{need_l:,}", "reasons": "；".join(reasons) or "—",
+                     "board": board, "parts": parts, "loss": loss, "util": parts / board if board else 0})
+    return {"rows": rows, "total": total}
+
+
+def write_loss_xlsx(path, r, title=""):
+    """損耗分析匯出 Excel：「損耗總表」+「每片明細」"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    a = loss_analysis(r)
+    tot = a["total"]
+    wb = Workbook()
+    thin = Side(style="thin", color="A0AEC0")
+    bd = Border(left=thin, right=thin, top=thin, bottom=thin)
+    hdr_fill = PatternFill("solid", fgColor="1A3050")
+
+    def table(ws, start, head, data, widths, pct_cols):   # pct_cols：百分比欄（1 起算）
+        for c, h in enumerate(head, 1):
+            x = ws.cell(start, c, h)
+            x.font = Font(bold=True, color="FFFFFF"); x.fill = hdr_fill; x.border = bd
+            x.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for i, row in enumerate(data, start + 1):
+            for c, v in enumerate(row, 1):
+                x = ws.cell(i, c, None if v == "" else v); x.border = bd
+                x.alignment = Alignment(vertical="center", wrap_text=isinstance(v, str) and len(v) > 20)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    x.number_format = "0.0%" if c in pct_cols else "#,##0"
+        for c, w in enumerate(widths, 1):
+            ws.column_dimensions[chr(64 + c)].width = w
+
+    ws = wb.active
+    ws.title = "損耗總表"
+    ws["A1"] = f"損耗分析{('　' + title) if title else ''}"
+    ws["A1"].font = Font(bold=True, size=14)
+    p = r["params"]
+    ws["A2"] = (f"案號 {p.get('proj_no', '')}　案名 {p.get('proj_name', '')}　"
+                f"採購限制：板寬 {p.get('bw_min', BW_MIN):,}~{p.get('bw_max', BW_MAX):,}、板長 {p.get('bl_min', BL_MIN):,}~{p.get('bl_max', BL_MAX):,}、"
+                f"板重 {p.get('w_min', W_MIN):,}~{p.get('w_max', W_MAX):,} kg")
+    loss_all = tot["board"] - tot["parts"]
+    ratio = lambda v: v / tot["board"] if tot["board"] else 0
+    lratio = lambda v: v / loss_all if loss_all else 0
+    data = [["零件（有效使用）", tot["parts"], ratio(tot["parts"]), "", "裁切成 BH 翼板 / 腹板的重量"]]
+    for k, name, desc in LOSS_CATS:
+        if abs(tot[k]) >= 0.5 or k in ("trim", "arrange"):
+            data.append([name, tot[k], ratio(tot[k]), lratio(tot[k]), desc])
+    data.append(["損耗合計", loss_all, ratio(loss_all), 1.0, ""])
+    data.append(["合計（板重）", tot["board"], 1.0, "", ""])
+    table(ws, 4, ["項目", "重量(kg)", "佔板重", "佔損耗", "說明"], data, [22, 14, 10, 10, 70], (3, 4))
+    ws.cell(len(data) + 6, 1, f"新購鋼板 {tot['new_board']:,.0f} kg，零件 {tot['new_parts']:,.0f} kg，"
+                              f"利用率 {tot['new_parts'] / tot['new_board'] * 100 if tot['new_board'] else 0:.1f}%")
+
+    ws2 = wb.create_sheet("每片明細")
+    head = ["片次", "材質", "板規格", "排數", "需要尺寸(寬×長)", "加大原因", "板重(kg)", "零件(kg)", "利用率"] +            [name + "(kg)" for _, name, _ in LOSS_CATS]
+    data = [[x["idx"], x["mat"], x["spec"], x["rows"], x["need"], x["reasons"], x["board"], x["parts"], x["util"]] +
+            [x["loss"][k] for k, _, _ in LOSS_CATS] for x in a["rows"]]
+    table(ws2, 1, head, data, [8, 10, 22, 6, 16, 48, 11, 11, 8] + [12] * len(LOSS_CATS), (9,))
+    ws2.freeze_panes = "B2"
+    wb.save(path)
+
+
 def write_layout_pdf(path, proj_no, proj_name, mat_name, cut_details, new_scraps,
                      serial_map=None, modified_specs=None):
     """
@@ -1985,13 +2122,14 @@ class PreviewWindow(tk.Toplevel):
             ("採購清單",   self._tab_purchase,   r),
             ("餘料清單",   self._tab_scraps,     r),
             ("切割明細",   self._tab_cuts,       r),
+            ("損耗分析",   self._tab_loss,       r),
         ]
         built_frames = {}
         for name, builder, data in tabs_data:
             frame = ttk.Frame(nb)
             built_frames[name] = frame
             builder(frame, data)
-        for name in ["配料清單", "BH拆板明細", "BH合板清單", "採購清單", "切割明細", "餘料清單"]:
+        for name in ["配料清單", "BH拆板明細", "BH合板清單", "採購清單", "切割明細", "餘料清單", "損耗分析"]:
             nb.add(built_frames[name], text=f"  {name}  ")
 
     def _make_tree(self, parent, cols, widths):
@@ -2095,6 +2233,75 @@ class PreviewWindow(tk.Toplevel):
                 sn_wf, spec, val["qty"], mat,
                 round(unit_wt, 1), round(val["total_wt"], 1)),
                 tags=("odd" if i%2==0 else "even",))
+
+    def _tab_loss(self, frame, r):
+        """損耗分析：上方總表（各原因合計）＋下方每片明細（加大原因、各項損耗）"""
+        a = loss_analysis(r)
+        tot = a["total"]
+        bar = tk.Frame(frame, bg=CLR_BG)
+        bar.pack(fill="x", padx=6, pady=(4, 0))
+        util = tot["new_parts"] / tot["new_board"] * 100 if tot["new_board"] else 0
+        tk.Label(bar, text=f"新購鋼板 {tot['new_board']:,.0f} kg　零件 {tot['new_parts']:,.0f} kg　利用率 {util:.1f}%"
+                           "　｜　💡 各項加總 = 板重；雙擊明細可查看排列圖",
+                 font=("Microsoft JhengHei", 10, "bold"), bg=CLR_BG, fg="#1A3050").pack(side="left")
+        tk.Button(bar, text="💾 匯出損耗分析 Excel", command=lambda: self._export_loss(r),
+                  bg="#4A6741", fg="white", font=("Microsoft JhengHei", 9, "bold"),
+                  relief="flat", padx=10, pady=3, cursor="hand2").pack(side="right")
+
+        # 總表
+        sf = tk.Frame(frame, bg=CLR_BG)
+        sf.pack(fill="x", padx=4, pady=4)
+        scols = ("項目", "重量(kg)", "佔板重", "佔損耗", "說明")
+        st = ttk.Treeview(sf, columns=scols, show="headings", height=len(LOSS_CATS) + 3)
+        for col, w in zip(scols, [150, 110, 70, 70, 520]):
+            st.heading(col, text=col)
+            st.column(col, width=w, anchor="w" if col == "說明" else "center")
+        st.tag_configure("comp", background="#D6EAF8")
+        loss_all = tot["board"] - tot["parts"]
+        pct = lambda v: f"{v / tot['board'] * 100:.2f}%" if tot["board"] else ""
+        lpct = lambda v: f"{v / loss_all * 100:.1f}%" if loss_all else ""
+        st.insert("", "end", values=("零件（有效使用）", f"{tot['parts']:,.0f}", pct(tot["parts"]), "", "裁切成 BH 翼板 / 腹板的重量"))
+        for k, name, desc in LOSS_CATS:
+            if abs(tot[k]) >= 0.5 or k in ("trim", "arrange"):
+                st.insert("", "end", values=(name, f"{tot[k]:,.0f}", pct(tot[k]), lpct(tot[k]), desc))
+        st.insert("", "end", values=("損耗合計", f"{loss_all:,.0f}", pct(loss_all), "100%", ""), tags=("comp",))
+        st.insert("", "end", values=("合計（板重）", f"{tot['board']:,.0f}", "100%", "", ""), tags=("comp",))
+        st.pack(fill="x")
+
+        # 每片明細
+        cols = ("片次", "材質", "板規格", "排數", "需要尺寸", "加大原因", "板重(kg)", "零件(kg)", "利用率", "損耗(kg)")
+        tree = self._make_tree(frame, cols, [60, 70, 170, 45, 110, 380, 80, 80, 60, 80])
+        tree.column("加大原因", anchor="w")
+        tree.tag_configure("pad", background="#FFF3CD")
+        self._loss_layouts = {}
+        for i, x in enumerate(a["rows"]):
+            lost = x["board"] - x["parts"]
+            tag = "pad" if x["reasons"] not in ("—", "使用現有餘料") else ("odd" if i % 2 == 0 else "even")
+            iid = tree.insert("", "end", values=(x["idx"], x["mat"], x["spec"], x["rows"], x["need"], x["reasons"],
+                                                 f"{x['board']:,.0f}", f"{x['parts']:,.0f}", f"{x['util'] * 100:.1f}%",
+                                                 f"{lost:,.0f}"), tags=(tag,))
+            ct = next((c for c in r["cut_details"] if c["idx"] == x["idx"]), None)
+            if ct and ct.get("layout"):
+                self._loss_layouts[iid] = (ct["idx"], ct["layout"])
+
+        def on_dbl(_e):
+            item = tree.focus()
+            if item in self._loss_layouts:
+                LayoutWindow(self, *self._loss_layouts[item])
+        tree.bind("<Double-1>", on_dbl)
+
+    def _export_loss(self, r):
+        from datetime import datetime
+        path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx", filetypes=[("Excel 檔案", "*.xlsx")],
+            initialfile=f"BH_損耗分析_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", parent=self)
+        if not path:
+            return
+        try:
+            write_loss_xlsx(path, r, self.title())
+            messagebox.showinfo("匯出完成", f"已匯出損耗分析：\n{path}", parent=self)
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e), parent=self)
 
     def _tab_purchase(self, frame, r):
         cols = ("NO","採購規格(mm)","數量","材質","單片重(kg)","總重(kg)")
