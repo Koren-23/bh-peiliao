@@ -479,12 +479,115 @@ def _plan_once(by_group, density, new_kerf, new_trim, scrap_kerf, scrap_trim,
                     boards.append((cols, cp, cu))
                 return area, boards
 
+            def _row_load(row):
+                return sum(p["length"] for p in row) + new_kerf * (len(row) - 1) if row else 0
+
+            def _uniq_desc(row):
+                out = []
+                for p in sorted(row, key=lambda d: -d["length"]):
+                    if not out or out[-1] != p["length"]:
+                        out.append(p["length"])
+                return out
+
+            def _take(row, length):
+                """從 row 取出第一支長度為 length 的零件"""
+                for i, p in enumerate(row):
+                    if p["length"] == length:
+                        return row.pop(i)
+
+            def _pack_rows_k(items, k, cap):
+                """把零件裝進 k 排（每排可用長度 cap）：先遞減首次適配，放不下的放最空的排，再以移動 / 交換消除超長"""
+                rows = [[] for _ in range(k)]
+                for p in sorted(items, key=lambda d: -d["length"]):
+                    tgt = None
+                    for r_ in rows:
+                        if _row_load(r_) + (new_kerf if r_ else 0) + p["length"] <= cap:
+                            tgt = r_
+                            break
+                    if tgt is None:
+                        tgt = rows[0]
+                        for r_ in rows[1:]:
+                            if _row_load(r_) < _row_load(tgt):
+                                tgt = r_
+                    tgt.append(p)
+                for _ in range(3000):
+                    ob = None
+                    for r_ in rows:
+                        if _row_load(r_) > cap and (ob is None or _row_load(r_) > _row_load(ob)):
+                            ob = r_
+                    if ob is None:
+                        return rows
+                    excess = _row_load(ob) - cap
+                    moved = False
+                    for x in _uniq_desc(ob):          # 1) 移動：把超長排的一支移到放得下的排
+                        for r_ in rows:
+                            if r_ is not ob and _row_load(r_) + (new_kerf if r_ else 0) + x <= cap:
+                                r_.append(_take(ob, x))
+                                moved = True
+                                break
+                        if moved:
+                            break
+                    if moved:
+                        continue
+                    best = None                       # 2) 交換：超長排的 x 換其他排較短的 y
+                    for x in _uniq_desc(ob):
+                        for r_ in rows:
+                            if r_ is ob:
+                                continue
+                            for y in _uniq_desc(r_):
+                                if y < x and _row_load(r_) - y + x <= cap:
+                                    d_ = abs(x - y - excess)
+                                    if best is None or d_ < best[0]:
+                                        best = (d_, x, r_, y)
+                    if best is None:
+                        return None
+                    _, x, r_, y = best
+                    px, py = _take(ob, x), _take(r_, y)
+                    ob.append(py)
+                    r_.append(px)
+                return None
+
+            def _pack_rows():
+                """策略 6：先把整組零件裝成最少的排（一維裝箱），再依排長由長到短每 max_cols 排組成一張板"""
+                cap = BL_USE - 2 * new_trim
+                items = sorted(remaining, key=lambda d: -d["length"])
+                if not items or items[0]["length"] > cap:
+                    return None
+                rows = []                             # 遞減首次適配
+                for p in items:
+                    for r_ in rows:
+                        if _row_load(r_) + new_kerf + p["length"] <= cap:
+                            r_.append(p)
+                            break
+                    else:
+                        rows.append([p])
+                k = len(rows) - 1
+                while k >= 1:                         # 嘗試減少排數
+                    rr = _pack_rows_k(items, k, cap)
+                    if rr is None:
+                        break
+                    rows = rr
+                    k -= 1
+                rows = [sorted(r_, key=lambda d: -d["length"]) for r_ in rows if r_]
+                rows.sort(key=lambda r_: -_row_load(r_))
+                boards, area = [], 0
+                for i in range(0, len(rows), max_cols):
+                    cp = rows[i:i + max_cols]
+                    cu = [new_trim + _row_load(r_) for r_ in cp]
+                    bw, bl = _board_dims(len(cp), max(cu))
+                    area += bw * bl
+                    boards.append((len(cp), cp, cu))
+                return area, boards
+
             # 每種規格分別以數種策略排列，取總板面積最小者（同分取先試的策略）
             best_pack = None
             for strat in (0, 2, 4):
                 area, boards = _pack(strat)
                 if best_pack is None or area < best_pack[0]:
                     best_pack = (area, boards)
+            rp = _pack_rows()
+            if rp and rp[0] < best_pack[0]:
+                best_pack = rp
 
             for bd in best_pack[1]:
                 if bd[0] is None:

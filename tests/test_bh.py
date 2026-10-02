@@ -287,6 +287,16 @@ class TestRegressions(unittest.TestCase):
             self.assertEqual([ws.cell(6, c).value for c in (1, 3, 4, 5, 7, 9, 14, 15)],
                              [1, "SN490B", "PL", 20, 2000, 10000, 2, "片"])
 
+    def test_row_packing_min_plates(self):
+        """排裝成最少排數：20261002 配料表的 PL14 腹板 152 支，理論最少 17 片（原本 18 片，最後一片只排 2 支）"""
+        data = [(1745, 2), (1335, 38), (4450, 4), (1860, 6), (3400, 18), (4750, 2), (1450, 2), (1260, 2), (1245, 2),
+                (1410, 2), (3390, 6), (4440, 2), (1630, 1), (1740, 2), (1810, 4), (1950, 2), (1385, 10), (1330, 20),
+                (1855, 4), (1285, 4), (1745, 2), (1740, 2), (1630, 1), (1695, 3), (3400, 4), (3500, 2), (3390, 2), (1695, 3)]
+        P = dict(BASE_P, new_kerf=1, new_trim=1, scrap_kerf=1, scrap_trim=0)
+        res = plan(P, [bh_row(f"B{i}", "BH1330X300X14X22", L, q) for i, (L, q) in enumerate(data)], it=1)
+        webs = [c for c in res["cut_details"] if c["board_spec"].startswith("PL14×")]
+        self.assertEqual(len(webs), 17)
+
     def test_type_by_suffix(self):
         """板別以名稱結尾 -F / -W 判斷（原 bug：構件編號含 F 時腹板被當成翼板）"""
         res = plan(dict(BASE_P, cut_mode="single"), [bh_row("FB1", "BH400×200×8×13", 9000, 1)], it=1)

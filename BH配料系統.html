@@ -786,12 +786,87 @@ function planOnce(groups, P, existing_scraps, seed) {
         return {area: area, boards: boards};
       };
 
+      var rowLoad = function (row) { var s = 0; row.forEach(function (p) { s += p.length; }); return row.length ? s + new_kerf * (row.length - 1) : 0; };
+      var uniqDesc = function (row) {
+        var out = [];
+        row.slice().sort(byLenDesc).forEach(function (p) { if (!out.length || out[out.length - 1] !== p.length) out.push(p.length); });
+        return out;
+      };
+      var take = function (row, length) { for (var i = 0; i < row.length; i++) if (row[i].length === length) return row.splice(i, 1)[0]; };
+      // 把零件裝進 k 排（每排可用長度 cap）：先遞減首次適配，放不下的放最空的排，再以移動 / 交換消除超長
+      var packRowsK = function (items, k, cap) {
+        var rows = [], it, i;
+        for (i = 0; i < k; i++) rows.push([]);
+        items.slice().sort(byLenDesc).forEach(function (p) {
+          var tgt = null;
+          for (var a = 0; a < rows.length; a++) if (rowLoad(rows[a]) + (rows[a].length ? new_kerf : 0) + p.length <= cap) { tgt = rows[a]; break; }
+          if (!tgt) { tgt = rows[0]; for (var b = 1; b < rows.length; b++) if (rowLoad(rows[b]) < rowLoad(tgt)) tgt = rows[b]; }
+          tgt.push(p);
+        });
+        for (it = 0; it < 3000; it++) {
+          var ob = null;
+          rows.forEach(function (r) { if (rowLoad(r) > cap && (!ob || rowLoad(r) > rowLoad(ob))) ob = r; });
+          if (!ob) return rows;
+          var excess = rowLoad(ob) - cap, moved = false, xs = uniqDesc(ob);
+          for (var xi = 0; xi < xs.length && !moved; xi++) {          // 1) 移動：把超長排的一支移到放得下的排
+            for (var ri = 0; ri < rows.length; ri++) {
+              var r1 = rows[ri];
+              if (r1 !== ob && rowLoad(r1) + (r1.length ? new_kerf : 0) + xs[xi] <= cap) { r1.push(take(ob, xs[xi])); moved = true; break; }
+            }
+          }
+          if (moved) continue;
+          var best = null;                                              // 2) 交換：超長排的 x 換其他排較短的 y
+          xs.forEach(function (x) {
+            rows.forEach(function (r2) {
+              if (r2 === ob) return;
+              uniqDesc(r2).forEach(function (y) {
+                if (y < x && rowLoad(r2) - y + x <= cap) {
+                  var d = Math.abs(x - y - excess);
+                  if (!best || d < best.d) best = {d: d, x: x, r: r2, y: y};
+                }
+              });
+            });
+          });
+          if (!best) return null;
+          var px = take(ob, best.x), py = take(best.r, best.y);
+          ob.push(py); best.r.push(px);
+        }
+        return null;
+      };
+      // 策略 6：先把整組零件裝成最少的排（一維裝箱），再依排長由長到短每 max_cols 排組成一張板
+      var packRows = function () {
+        var cap = BL_USE - 2 * new_trim, items = remaining.slice().sort(byLenDesc);
+        if (!items.length || items[0].length > cap) return null;
+        var rows = [];
+        items.forEach(function (p) {
+          for (var a = 0; a < rows.length; a++) if (rowLoad(rows[a]) + new_kerf + p.length <= cap) { rows[a].push(p); return; }
+          rows.push([p]);
+        });
+        for (var k = rows.length - 1; k >= 1; k--) {
+          var rr = packRowsK(items, k, cap);
+          if (!rr) break;
+          rows = rr;
+        }
+        rows = rows.filter(function (r) { return r.length; }).map(function (r) { return r.slice().sort(byLenDesc); });
+        rows.sort(function (a, b) { return rowLoad(b) - rowLoad(a); });
+        var boards = [], area = 0;
+        for (var i = 0; i < rows.length; i += max_cols) {
+          var cp = rows.slice(i, i + max_cols), cu = cp.map(function (r) { return new_trim + rowLoad(r); });
+          var d = board_dims(cp.length, Math.max.apply(null, cu));
+          area += d[0] * d[1];
+          boards.push({cols: cp.length, cp: cp, cu: cu});
+        }
+        return {area: area, boards: boards};
+      };
+
       // 每種規格分別以數種策略排列，取總板面積最小者（同分取先試的策略）
       var bestPack = null;
       [0, 2, 4].forEach(function (strat) {
         var pk = pack(strat);
         if (!bestPack || pk.area < bestPack.area) bestPack = pk;
       });
+      var rp = packRows();
+      if (rp && rp.area < bestPack.area) bestPack = rp;
       bestPack.boards.forEach(function (bd) {
         if (bd.piece) {
           add_board(1, bd.piece.length + new_trim * 2, [bd.piece], "", null, [new_trim + bd.piece.length], [[bd.piece]]);
